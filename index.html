@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>美团智播 - AI主播全天在线，生意不打烊</title>
+  <script>
+    // 禁用浏览器的滚动位置记忆，每次刷新都回到首屏顶部
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+    window.addEventListener('beforeunload', function () {
+      window.scrollTo(0, 0);
+    });
+    window.addEventListener('load', function () {
+      window.scrollTo(0, 0);
+    });
+
+    /* =============================================================
+     * 等比缩放适配：视口宽度 / 设计基准宽度，整页 1:1 等比缩放
+     *  - 视口 >= DESIGN_WIDTH：封顶为 1，页面定格在基准尺寸并居中
+     *  - BREAKPOINT < 视口 < DESIGN_WIDTH：整页等比缩小
+     *  - 视口 <= BREAKPOINT：缩放归 1，交给媒体查询的移动端重排布局
+     * ============================================================= */
+    (function () {
+      var DESIGN_WIDTH = 1688; // 设计基准宽度（与内容区 max-width 一致）
+      var BREAKPOINT = 1100;   // 低于此宽度切回响应式重排，不再等比缩放
+
+      function applyScale() {
+        var w = document.documentElement.clientWidth || window.innerWidth;
+        var scale;
+        if (w <= BREAKPOINT) {
+          scale = 1; // 移动端：交给媒体查询
+        } else if (w >= DESIGN_WIDTH) {
+          scale = 1; // 封顶：超过基准不再放大
+        } else {
+          scale = w / DESIGN_WIDTH; // 桌面窄区间：等比缩小
+        }
+        // 用 zoom 缩放：不破坏 position:fixed，无需补偿高度，滚动正常
+        document.documentElement.style.zoom = scale;
+      }
+
+      applyScale();
+      window.addEventListener('resize', applyScale, { passive: true });
+      window.addEventListener('orientationchange', applyScale, { passive: true });
+    })();
+  </script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, "Helvetica Neue", Arial, sans-serif;
+      background: #ffffff;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* =============================================
+       生命游戏背景动效（细胞自动机）
+       —— 固定全屏，铺在白色底色之上、所有内容之下
+       可定制变量都在 :root，JS 配置见 LIFE_CONFIG
+    ============================================= */
+    :root {
+      /* canvas 整体透明度：越小越淡（若隐若现） */
+      --life-bg-opacity: 0.4;
+    }
+
+    .life-bg-canvas {
+      position: absolute;      /* 改为绝对定位：仅覆盖首屏 hero 区，随页面滚走 */
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;              /* 在白色 body 之上、hero 内容之下 */
+      pointer-events: none;    /* 不拦截点击/滚动 */
+      opacity: var(--life-bg-opacity);
+    }
+
+    /* =============================================
+       导航栏
+    ============================================= */
+    .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 200;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.6);
+      -webkit-backdrop-filter: saturate(180%) blur(18px);
+      backdrop-filter: saturate(180%) blur(18px);
+      transition: transform 0.35s ease;
+    }
+
+    /* 滚动隐藏时：整条导航栏向上移出视口 */
+    .navbar.navbar-hidden {
+      transform: translateY(-100%);
+    }
+
+    .navbar-inner {
+      max-width: 1688px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 116px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 113px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      text-decoration: none;
+    }
+
+    .logo img {
+      height: 34px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 48px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: rgba(20, 10, 45, 0.85);
+      font-size: 16px;
+      font-weight: 400;
+      transition: opacity 0.2s;
+      white-space: nowrap;
+    }
+
+    .nav-links a:hover {
+      opacity: 0.7;
+    }
+
+    .btn-nav {
+      background: #1a1049;
+      color: #fff !important;
+      padding: 13px 30px;
+      border-radius: 100px;
+      font-size: 16px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn-nav:hover {
+      background: #2d1b7a;
+      transform: translateY(-1px);
+    }
+
+    /* =============================================
+       页面容器
+    ============================================= */
+    .page {
+      position: relative;
+      width: 100%;
+    }
+
+    /* 滚动动画预留空间 */
+    .scroll-zone {
+      position: relative;
+      height: 3000px;
+      background: transparent;
+    }
+
+    /* =============================================
+       Hero 区域 - 左右布局
+    ============================================= */
+    .hero {
+      position: relative;
+      height: 1122px;
+      overflow: visible;
+      background: transparent;
+    }
+
+    /* 首屏底部背景光晕素材：1.5倍大小，bottom 补偿新图比例，保持顶边视觉位置一致 */
+    .hero-glow-bg {
+      position: absolute;
+      left: 50%;
+      bottom: -3033px;
+      transform: translateX(-50%);
+      transform-origin: center bottom;
+      width: 150%;
+      max-width: 2880px;
+      height: auto;
+      object-fit: contain;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* 噪点抖动层：用极细噪声打散渐变色带（banding），消除分层视觉 */
+    .hero-noise {
+      position: absolute;
+      left: 0;
+      bottom: -3033px;
+      width: 100%;
+      height: 3755px;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.06;
+      mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 200px 200px;
+    }
+    .hero-inner {
+      max-width: 1688px;
+      margin: 0 auto;
+      padding: 0 116px;
+      display: flex;
+      align-items: flex-start;
+      position: relative;
+      height: 100%;
+    }
+
+    /* ====== 左侧内容 ====== */
+    .hero-left {
+      position: relative;
+      z-index: 10;
+      max-width: 800px;
+      padding-top: 273px;
+    }
+
+    /* 主标题 */
+    .hero-title-1 {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 96px;
+      font-weight: 600;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+      color: #0c0024;
+      margin-bottom: 0;
+      /* 行高固定为文字本身高度，放大的光标只视觉溢出、不撑高行，避免布局跳动 */
+      display: flex;
+      align-items: center;
+      height: 1.1em;
+      overflow: visible;
+    }
+
+    /* 副标题 */
+    .hero-title-2-wrap {
+      display: flex;
+      align-items: center;
+      margin-top: 20px;
+      margin-bottom: 44px;
+      /* 同第一行：固定行高，放大的光标只视觉溢出、不撑高行，避免第二行出现时整体跳动 */
+      height: 1.1em;
+      font-size: 96px;
+      overflow: visible;
+    }
+
+    .hero-title-2 {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 96px;
+      font-weight: 600;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+background: linear-gradient(120deg, #4B1EFF, #6B3DFF, #9B6BFF, #6B3DFF, #4B1EFF);
+background-size: 200% 100%;
+-webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: titleGradientFlow 4s linear infinite;
+    }
+
+    @keyframes titleGradientFlow {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 200% 50%; }
+    }
+
+    .cursor-blink {
+      position: relative;
+      width: 48px;          /* 原 32px 的 1.5 倍 */
+      height: 195px;        /* 原 130px 的 1.5 倍 */
+      margin-left: 6px;
+      flex-shrink: 0;
+      object-fit: contain;
+      vertical-align: middle;
+      align-self: center;   /* 在固定高度的行内垂直居中，超出部分溢出而不撑高行 */
+      animation: cursorBlink 0.5s ease-in-out infinite;
+    }
+
+    /* 隐藏的光标（未轮到该行打字时） */
+    .cursor-hidden {
+      display: none;
+    }
+
+    @keyframes cursorBlink {
+      0%   { opacity: 1; }
+      50%  { opacity: 0.05; }
+      100% { opacity: 1; }
+    }
+
+    /* CTA 按钮 */
+    .btn-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: #1a1049;
+      color: #fff;
+      padding: 24px 60px;
+      border-radius: 100px;
+      font-size: 20px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.15s;
+      margin-bottom: 36px;
+    }
+
+    .btn-cta:hover {
+      background: #2d1b7a;
+      transform: translateY(-2px);
+    }
+
+    /* 打字完成前隐藏按钮，完成后淑入 */
+    .btn-cta-hidden {
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+    }
+
+    .btn-cta {
+      transition: background 0.2s, transform 0.4s ease, opacity 0.4s ease;
+    }
+
+    /* 底部说明文字 */
+    .hero-desc {
+      font-size: 14px;
+      color: #21183e;
+      letter-spacing: 0.01em;
+      font-weight: 400;
+    }
+
+    /* ====== 第二屏打字机文案 ====== */
+    .scroll-line {
+      position: absolute;
+      top: 220px;            /* 进入第二屏靠上位置 */
+      left: 50%;
+      transform: translateX(-50%);
+      display: inline-flex;
+      align-items: center;
+      font-size: 28px;
+      line-height: 1;
+      color: #ffffff;        /* 纯白 */
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      z-index: 2;
+    }
+
+    /* 第二屏数据卡片：三列并排，位于文案下方 */
+    .stat-cards {
+      position: absolute;
+      top: 320px;            /* 文案（top:220）下方 */
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 28px;
+      width: 100%;
+      max-width: 1100px;
+      padding: 0 40px;
+      box-sizing: border-box;
+      justify-content: center;
+      perspective: 1600px;   /* 3D 透视：让翻转有纵深 */
+      z-index: 2;
+    }
+
+    /* 卡片翻转容器：初始整体淡入上浮 */
+    .stat-card {
+      flex: 1 1 0;
+      max-width: 340px;
+      position: relative;
+      aspect-ratio: 824 / 960;   /* 与素材比例一致 */
+      opacity: 0;
+      transform: translateY(28px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .stat-card.stat-show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* 内部翻转层：默认显示背面，翻转后显示正面 */
+    .card-inner {
+      position: absolute;
+      inset: 0;
+      transform-style: preserve-3d;
+      transform: rotateY(180deg);            /* 初始：背面朝前 */
+      transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .stat-card.flipped .card-inner {
+      transform: rotateY(0deg);              /* 翻转后：正面朝前 */
+    }
+
+    .card-front,
+    .card-back {
+      position: absolute;
+      inset: 0;
+      border-radius: 24px;
+      overflow: hidden;
+      -webkit-backface-visibility: hidden;
+      backface-visibility: hidden;
+    }
+
+    .card-back {
+      transform: rotateY(180deg);            /* 背面背对正面 */
+    }
+
+    .card-front img,
+    .card-back img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* 第二屏光标：复用首屏 cursor.png 切图，高度为文本高 1.5 倍（28×1.5=42px） */
+    .scroll-cursor {
+      display: inline-block;
+      height: 42px;          /* 文本高 28px 的 1.5 倍 */
+      width: auto;           /* 等比缩放 */
+      margin-left: 6px;
+      object-fit: contain;
+      vertical-align: middle;
+      flex-shrink: 0;
+      animation: cursorBlink 0.5s ease-in-out infinite;
+    }
+
+    /* =============================================
+       第三屏：打字机主标题屏（叠在 scroll-zone 内的光晕背景上）
+    ============================================= */
+    .screen3 {
+      position: absolute;
+      top: 1100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 1100px;
+      padding: 0 40px;
+      box-sizing: border-box;
+      text-align: center;
+      z-index: 2;
+    }
+
+    .screen3-title {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 48px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .screen3-title .s3-dark { color: #0c0024; }
+
+    .screen3-title .s3-grad {
+background: linear-gradient(120deg, #4B1EFF, #6B3DFF, #9B6BFF, #6B3DFF, #4B1EFF);
+background-size: 200% 100%;
+-webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: titleGradientFlow 4s linear infinite;
+    }
+
+    /* 第三屏光标：复用 cursor.png 切图，随字号等比，常驻闪烁 */
+    .screen3-cursor {
+      display: inline-block;
+      height: 78px;          /* 原 52px 的 1.5 倍 */
+      width: auto;
+      margin-left: 6px;
+      object-fit: contain;
+      vertical-align: middle;
+      flex-shrink: 0;
+      animation: cursorBlink 0.5s ease-in-out infinite;
+    }
+
+    /* =============================================
+       逐字揭示（模糊淡入）—— 统一标题出现效果
+       参数集中在 :root，JS 配置见 MLB_REVEAL_CONFIG
+    ============================================= */
+    :root {
+      --mlb-reveal-duration: 0.55s;                       /* 单个字淡入时长 */
+      --mlb-reveal-ease: cubic-bezier(.22, 1, .36, 1);     /* 缓动曲线 */
+      --mlb-reveal-blur: 8px;                              /* 初始模糊量 */
+      --mlb-reveal-shift: 0.35em;                          /* 初始上浮距离（随字号） */
+    }
+
+    /* 拆出的单个字：默认隐藏（模糊+下移），加 .mlb-visible 后揭示 */
+    .mlb-char {
+      display: inline-block;
+      opacity: 0;
+      transform: translateY(var(--mlb-reveal-shift));
+      filter: blur(var(--mlb-reveal-blur));
+      transition:
+        opacity var(--mlb-reveal-duration) var(--mlb-reveal-ease),
+        transform var(--mlb-reveal-duration) var(--mlb-reveal-ease),
+        filter var(--mlb-reveal-duration) var(--mlb-reveal-ease);
+      /* 保留空白字符的宽度，避免布局抖动 */
+      white-space: pre;
+    }
+
+    .mlb-char.mlb-visible {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+
+    /* 渐变标题段内拆出的字：所有字共用「整句宽度」的同一条渐变坐标系，
+       每个字按自身在整句中的水平偏移（--mlb-grad-x）裁剪对应片段，
+       拼起来是一条连续渐变（而不是每字各走一遍）。
+       --mlb-grad-w 为整句像素宽度，由 JS 在拆字后写入。
+       流动动画 mlbGradFlow 在每字偏移基础上整体平移，保持整句一起流动。 */
+    .hero-title-2 .mlb-char,
+    .screen3-title .s3-grad .mlb-char {
+      --mlb-grad-x: 0px;
+      --mlb-grad-w: 100%;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+      background-image: linear-gradient(120deg, #4B1EFF, #6B3DFF, #9B6BFF, #6B3DFF, #4B1EFF);
+      /* 渐变铺满整句宽度的 2 倍（留出流动空间），按字偏移取片段 */
+      background-size: calc(var(--mlb-grad-w) * 2) 100%;
+      background-position: var(--mlb-grad-x) 50%;
+      background-repeat: no-repeat;
+      -webkit-background-clip: text;
+      background-clip: text;
+      animation: mlbGradFlow 4s linear infinite;
+    }
+
+    /* 流动：在每个字的基础偏移 --mlb-grad-x 上整体平移整句宽度，所有字同步 */
+    @keyframes mlbGradFlow {
+      0%   { background-position: var(--mlb-grad-x) 50%; }
+      100% { background-position: calc(var(--mlb-grad-x) - var(--mlb-grad-w)) 50%; }
+    }
+
+    .screen3-sub {
+      margin-top: 18px;
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 18px;
+      color: #6b6480;
+      letter-spacing: 0.02em;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+
+    .screen3-sub.s3-sub-show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* =============================================
+       步骤流程模块（左文右图）—— 叠在 scroll-zone 内，screen3 下方
+    ============================================= */
+    .steps-section {
+      position: absolute;
+      top: 1280px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 1200px;
+      padding: 0 40px;
+      box-sizing: border-box;
+      z-index: 2;
+    }
+
+    .step-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 64px;
+    }
+
+    /* 左侧文字 */
+    .step-text {
+      flex: 0 0 38%;
+      max-width: 38%;
+      position: relative;
+      padding-top: 40px;
+    }
+
+    /* 超大灰色序号，作为底层装饰 */
+    .step-num {
+      position: absolute;
+      top: -10px;
+      left: -8px;
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 120px;
+      font-weight: 700;
+      line-height: 1;
+      color: #1a0a3a;
+      opacity: 0.06;
+      letter-spacing: -0.02em;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .step-name {
+      position: relative;
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 40px;
+      font-weight: 600;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      color: #4B1EFF;
+      margin: 0 0 16px;
+    }
+
+    .step-desc {
+      position: relative;
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 20px;
+      line-height: 1.6;
+      letter-spacing: 0.01em;
+      color: #3a3354;
+      margin: 0;
+    }
+
+    /* 图片（放大约 2 倍，居中显示） */
+    .step-image {
+      flex: 0 0 auto;
+      width: 980px;
+      max-width: 100%;
+    }
+
+    .step-image img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    /* ====== 右侧图片 ====== */
+    .hero-right {
+      position: absolute;
+      right: 116px;
+      top: -10px;
+      width: 856px;
+      height: 856px;
+      z-index: auto;
+    }
+
+    .hero-3d {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      filter: none;
+    }
+
+    .hero-video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      transform: scaleY(-1);
+      position: relative;
+      z-index: 5;
+    }
+
+    /* 倒影：相对主视频再垂直翻转回正，透明度10%，与原视频框间隔-150px；图层置于背景光晕图下方 */
+    .hero-video-reflection {
+      position: absolute;
+      left: 0;
+      top: calc(100% - 150px);
+      transform: scaleY(1);
+      opacity: 0.1;
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    /* =============================================
+       响应式
+    ============================================= */
+    /* 1100~1688px 桌面区间已改为整页等比缩放（见 head 脚本 applyScale），
+       不再用中间断点微调字号/padding，以保持严格等比 */
+
+    @media (max-width: 1100px) {
+      .nav-links { display: none; }
+      .hero {
+        height: auto;
+        min-height: 900px;
+      }
+      .hero-inner {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding-top: 120px;
+        padding-bottom: 60px;
+      }
+      .hero-left {
+        padding-top: 0;
+        max-width: 100%;
+      }
+      .hero-right {
+        position: relative;
+        right: auto;
+        top: auto;
+        width: 100%;
+        max-width: 500px;
+        height: auto;
+      }
+      .hero-3d {
+        height: auto;
+      }
+      .hero-title-2-wrap {
+        justify-content: center;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .navbar-inner,
+      .hero-inner {
+        padding-left: 24px;
+        padding-right: 24px;
+      }
+      .hero-title-1,
+      .hero-title-2 {
+        font-size: 40px;
+      }
+      /* 第二行容器 font-size 同步缩小，使其固定行高（1.1em）在移动端也正确 */
+      .hero-title-2-wrap {
+        font-size: 40px;
+      }
+      .cursor-blink {
+        width: 21px;          /* 原 14px 的 1.5 倍 */
+        height: 84px;        /* 原 56px 的 1.5 倍 */
+      }
+      .btn-cta {
+        padding: 16px 40px;
+        font-size: 18px;
+      }
+      .hero-right {
+        max-width: 300px;
+      }
+      .nav-left {
+        gap: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 导航栏 -->
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div class="nav-left">
+        <a href="#" class="logo">
+          <img src="assets/logo.png" alt="美团智播">
+        </a>
+        <ul class="nav-links">
+          <li><a href="#">使用说明</a></li>
+          <li><a href="#">产品能力</a></li>
+          <li><a href="#">商家案例</a></li>
+        </ul>
+      </div>
+      <a href="#" class="btn-nav">免费体验</a>
+    </div>
+  </nav>
+
+  <div class="page">
+
+  <!-- Hero 区域 - 左右布局 -->
+  <section class="hero">
+
+    <!-- 生命游戏背景动效（细胞自动机）：仅首屏可见，铺在 hero 最底层 -->
+    <canvas id="lifeBgCanvas" class="life-bg-canvas" aria-hidden="true"></canvas>
+
+    <!-- 首屏底部背景光晕 -->
+    <img src="assets/hero-glow-bg.png" alt="" class="hero-glow-bg">
+        <!-- 噪点抖动层：消除渐变色带 -->
+        <div class="hero-noise"></div>
+      <div class="hero-inner">
+
+        <!-- 左侧文字内容 -->
+        <div class="hero-left">
+
+          <!-- 主标题（打字机逐字输出，光标跟随） -->
+          <h1 class="hero-title-1"><span class="type-text" data-text="AI主播全天在线"></span><img src="assets/cursor.png" alt="" class="cursor-blink" data-line="1"></h1>
+
+          <!-- 副标题 -->
+          <div class="hero-title-2-wrap">
+            <span class="hero-title-2"><span class="type-text" data-text="生意不打烊"></span></span><img src="assets/cursor.png" alt="" class="cursor-blink cursor-hidden" data-line="2">
+          </div>
+
+          <!-- CTA 按钮（打字完成后淡入出现） -->
+          <a href="#" class="btn-cta btn-cta-hidden">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="flex-shrink:0">
+              <path d="M7 1L8.5 5.5L13 7L8.5 8.5L7 13L5.5 8.5L1 7L5.5 5.5L7 1Z" fill="white"/>
+            </svg>
+            免费体验
+          </a>
+
+        </div>
+
+        <!-- 右侧3D视频 -->
+        <div class="hero-right">
+          <video class="hero-video" autoplay loop muted playsinline>
+            <source src="assets/crystal-orb.webm" type="video/webm">
+          </video>
+          <!-- 倒影 -->
+          <video class="hero-video hero-video-reflection" autoplay loop muted playsinline aria-hidden="true">
+            <source src="assets/crystal-orb.webm" type="video/webm">
+          </video>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 滚动动画预留空间：让页面可滚动到第三屏以后，为光晕图动画提供行程 -->
+    <section class="scroll-zone">
+      <!-- 第二屏文案：滚动进入时打字机逐字出现，光标跟随 -->
+      <div class="scroll-line">
+        <span class="scroll-type" data-text="你专注把店开好，剩下的让 AI打理一切"></span><img src="assets/cursor.png" alt="" class="scroll-cursor">
+      </div>
+
+      <!-- 数据卡片：三列并排，滑入后从背面翻转到正面 -->
+      <div class="stat-cards">
+        <div class="stat-card">
+          <div class="card-inner">
+            <div class="card-front"><img src="assets/card-1.png" alt="7x24h 不间断直播"></div>
+            <div class="card-back"><img src="assets/card-back.png" alt=""></div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="card-inner">
+            <div class="card-front"><img src="assets/card-2.png" alt="2.05亿 带动成交额"></div>
+            <div class="card-back"><img src="assets/card-back.png" alt=""></div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="card-inner">
+            <div class="card-front"><img src="assets/card-3.png" alt="4788+ 入驻商家"></div>
+            <div class="card-back"><img src="assets/card-back.png" alt=""></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 第三屏：打字机主标题屏（叠在光晕背景上） -->
+      <div class="screen3">
+        <div class="screen3-title"><span class="s3-dark s3-type"></span><span class="s3-grad s3-type"></span><img src="assets/cursor.png" alt="" class="screen3-cursor"></div>
+        <div class="screen3-sub">不用懂直播，不用请人，3分钟搞定一个直播间</div>
+      </div>
+
+      <!-- 步骤 01：选商品（图片居中） -->
+      <div class="steps-section">
+        <div class="step-row">
+          <div class="step-image">
+            <img src="assets/step-1.png" alt="选商品后台界面">
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    (function () {
+      var glow = document.querySelector('.hero-glow-bg');
+      if (!glow) return;
+      var cards = document.querySelector('.stat-cards');
+
+      // 动画起点：第三屏（以视口高度为一屏，第三屏 ≈ 2 * 视口高）
+      // 动画行程：从起点再滚动 800px 完成完整变化
+      var START_RATIO = 2;      // 第三屏起点 = 2 屏高
+      var DURATION = 800;       // 动画滚动行程（px）
+
+      var BASE_WIDTH = 150;     // 起始宽度 %（相对“换算基准宽度”）
+      var MAX_WIDTH = 500;      // 最终宽度 %（相对“换算基准宽度”）
+      var BASE_BOTTOM = -3033;  // 起始 bottom（px，已按新图比例补偿，使顶边视觉位置与旧图一致）
+      var RISE = 1200;          // 向上移动距离（px）
+
+      // 设计基准宽度：% 以此为基准换算成 px，且不随屏幕变窄而缩小。
+      // 屏幕 ≥ 1920 时背景跟随视口放大（等价 vw）；屏幕 < 1920 时锁定 1920，
+      // 背景尺寸不再缩小，从而与下方固定 px 定位的模块始终保持同样的位置关系，避免重叠。
+      var DESIGN_WIDTH = 1920;
+      function refWidth() { return Math.max(window.innerWidth, DESIGN_WIDTH); }
+
+      // 视差：卡片滑出视口顶部时，底图“加速向上”离开
+      var PARALLAX_BOOST = 2.5; // 底图相对卡片的额外移动倍率（>1 即比卡片更快上移）
+
+      // 深色渐变图整体向下偏移（px）
+      var OFFSET_Y = 50;
+      // 呼吸感：静止状态下缓慢放大缩小
+      var BREATHE_AMP = 0.02;   // 缩放幅度（±2%，即 0.98~1.02）
+      var BREATHE_PERIOD = 8000; // 一次呼吸时长（ms）
+
+      function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+      // 当前最新一次滚动算出的视差位移，呼吸循环复用它
+      var curWidth = BASE_WIDTH;
+      var curBottom = BASE_BOTTOM;
+      var curExtraRise = 0;
+
+      function onScroll() {
+        var start = window.innerHeight * START_RATIO;
+        var progress = clamp((window.scrollY - start) / DURATION, 0, 1);
+
+        // 宽度百分比相对“换算基准宽度”（≥1920，窄屏锁 1920）换算成 px，
+        // 使背景尺寸不随屏幕变窄而缩小，与下方固定 px 模块保持一致的位置关系
+        var widthPct = BASE_WIDTH + (MAX_WIDTH - BASE_WIDTH) * progress;
+        var width = widthPct / 100 * refWidth();
+        var bottom = BASE_BOTTOM + RISE * progress;
+
+        // ===== 卡片离场视差 =====
+        // 卡片自身随页面滚动正常上移；当卡片顶部越过视口顶部后开始计算“离场进度”，
+        // 让底图额外向上位移（比卡片更快），卡片完全离开屏幕时底图也已移出屏幕。
+        var extraRise = 0;
+        if (cards) {
+          var rect = cards.getBoundingClientRect();
+          // 卡片完全在视口内时 leave=0；卡片底部刚离开视口顶部时 leave=1
+          var travel = rect.height + window.innerHeight; // 卡片从“底进顶出”所需滚动距离的参考量
+          // 以卡片底边相对视口顶部的位置衡量离场：底边在视口顶部时(rect.bottom=0)视为离场结束
+          var leave = clamp(1 - (rect.bottom / travel), 0, 1);
+          // 卡片随滚动已上移的“自然距离”近似为 leave*travel，底图额外多走 (BOOST-1) 倍
+          extraRise = leave * travel * (PARALLAX_BOOST - 1);
+        }
+
+        // 存下本帧视差结果，宽高直接写，transform 交给呼吸循环统一写
+        curWidth = width;
+        curBottom = bottom;
+        curExtraRise = extraRise;
+        glow.style.width = curWidth + 'px';
+        glow.style.bottom = curBottom + 'px';
+      }
+
+      // 呼吸 + 视差统一写入 transform：
+      // translateX 居中 / translateY（视差上移 + 整体下移50px）/ scale（呼吸脉动）
+      var reduceMotion = window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function renderTransform(scale) {
+        var ty = OFFSET_Y - curExtraRise;
+        glow.style.transform =
+          'translateX(-50%) translateY(' + ty + 'px) scale(' + scale + ')';
+      }
+
+      function breatheLoop(ts) {
+        // 正弦呼吸：scale 在 (1-AMP) ~ (1+AMP) 之间平滑往返
+        var phase = (ts % BREATHE_PERIOD) / BREATHE_PERIOD; // 0~1
+        var scale = 1 + BREATHE_AMP * Math.sin(phase * Math.PI * 2);
+        renderTransform(scale);
+        window.requestAnimationFrame(breatheLoop);
+      }
+
+      window.addEventListener('scroll', function () {
+        window.requestAnimationFrame(onScroll);
+      }, { passive: true });
+      // 窗口尺寸变化时，换算基准 refWidth() 会变，需重新计算背景宽度
+      window.addEventListener('resize', function () {
+        window.requestAnimationFrame(onScroll);
+      }, { passive: true });
+      onScroll();
+
+      if (reduceMotion) {
+        renderTransform(1); // 关闭呼吸，仅保留下移
+      } else {
+        window.requestAnimationFrame(breatheLoop);
+      }
+    })();
+  </script>
+
+  <!-- 逐字揭示（模糊淡入）共享库：三处标题复用，含 init()/destroy() -->
+  <script>
+    /* ============================================================
+     * 可定制参数：统一控制三处标题的逐字揭示节奏
+     * （视觉相关的时长/模糊/位移在 CSS :root 的 --mlb-* 变量里）
+     * ============================================================ */
+    window.MLB_REVEAL_CONFIG = {
+      charDelay: 55,     // 相邻两个字揭示的间隔（ms），越小越快
+      lineGap: 180,      // 多段（多行）之间的额外停顿（ms）
+      startDelay: 300    // 字体就绪后到开始揭示的停顿（ms）
+    };
+
+    /* 创建一个逐字揭示控制器。
+     * options:
+     *   segments: [{ el, cursor }]  顺序揭示的段；el 为承载文字的元素（文字取自 data-text 或现有 textContent），cursor 为可选的跟随光标元素
+     *   onComplete: 全部揭示完成回调
+     * 返回 { init, destroy }
+     */
+    window.createMlbReveal = function (options) {
+      var cfg = window.MLB_REVEAL_CONFIG;
+      var segments = options.segments || [];
+      var onComplete = options.onComplete;
+
+      var timers = [];        // 所有 setTimeout 句柄，destroy 时清理
+      var built = false;      // 是否已拆字
+      var segData = [];       // 每段拆出的 { el, cursor, chars:[span], text }
+
+      function clearTimers() {
+        for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+        timers = [];
+      }
+
+      // 把一段文字拆成 .mlb-char span（保留空格宽度），全部就位但隐藏
+      function buildSegment(seg) {
+        var el = seg.el;
+        var text = el.getAttribute('data-text');
+        if (text === null) text = el.textContent || '';
+        el.textContent = '';
+        var chars = [];
+        for (var i = 0; i < text.length; i++) {
+          var span = document.createElement('span');
+          span.className = 'mlb-char';
+          // 空格用 \u00a0 占位，确保 inline-block 有宽度
+          span.textContent = text[i] === ' ' ? '\u00a0' : text[i];
+          el.appendChild(span);
+          chars.push(span);
+        }
+        // 判断本段是否为渐变文字段（需要整句连续渐变）
+        var isGrad = !!(el.closest && el.closest('.hero-title-2, .screen3-title .s3-grad'));
+        return { el: el, cursor: seg.cursor || null, chars: chars, text: text, isGrad: isGrad };
+      }
+
+      // 让渐变段的每个字共用「整句」坐标系：写入整句宽度与该字的水平偏移，
+      // 使各字裁出的渐变片段拼起来是一条连续渐变。需在字已就位（占好宽度）后调用。
+      function applyGradientCoords(s) {
+        if (!s.isGrad || !s.chars.length) return;
+        // 以第一个字的左边为整句原点
+        var baseLeft = s.chars[0].offsetLeft;
+        var last = s.chars[s.chars.length - 1];
+        var totalW = (last.offsetLeft + last.offsetWidth) - baseLeft;
+        if (totalW <= 0) return;
+        s.chars.forEach(function (span) {
+          var x = span.offsetLeft - baseLeft;  // 该字相对整句的左偏移
+          span.style.setProperty('--mlb-grad-w', totalW + 'px');
+          // 渐变整体相对该字向左移 x，使该字露出的是整句渐变在 x 处的片段
+          span.style.setProperty('--mlb-grad-x', (-x) + 'px');
+        });
+      }
+
+      // 让光标跟在某个字之后（插入到该 char 的下一个兄弟位置）
+      function moveCursorAfter(cursor, charSpan) {
+        if (!cursor) return;
+        if (charSpan && charSpan.parentNode) {
+          charSpan.parentNode.insertBefore(cursor, charSpan.nextSibling);
+        }
+      }
+
+      function init() {
+        if (built) return;
+        built = true;
+
+        // 1) 先全部拆字、就位（占好宽度，避免揭示时抖动）
+        segData = segments.map(buildSegment);
+
+        // 1.5) 渐变段：按整句坐标系给每个字写入渐变偏移，拼成连续渐变
+        segData.forEach(applyGradientCoords);
+
+        // 2) 把所有光标先藏起来，揭到哪段再显示哪段的光标
+        segData.forEach(function (s) {
+          if (s.cursor) s.cursor.classList.add('cursor-hidden');
+        });
+
+        // 3) 顺序揭示各段，光标跟随
+        var elapsed = cfg.startDelay;
+        segData.forEach(function (s, si) {
+          // 段开始：显示本段光标，并把上一段光标藏起
+          timers.push(setTimeout((function (seg, idx) {
+            return function () {
+              segData.forEach(function (other, oi) {
+                if (other.cursor) {
+                  if (oi === idx) other.cursor.classList.remove('cursor-hidden');
+                  else other.cursor.classList.add('cursor-hidden');
+                }
+              });
+              // 段开头先把光标放到第一个字之前
+              if (seg.cursor && seg.chars[0]) {
+                seg.chars[0].parentNode.insertBefore(seg.cursor, seg.chars[0]);
+              }
+            };
+          })(s, si), elapsed));
+
+          // 逐个字揭示，并让光标跟到该字之后
+          s.chars.forEach(function (charSpan, ci) {
+            timers.push(setTimeout((function (span, seg) {
+              return function () {
+                span.classList.add('mlb-visible');
+                moveCursorAfter(seg.cursor, span);
+              };
+            })(charSpan, s), elapsed + ci * cfg.charDelay));
+          });
+
+          elapsed += s.chars.length * cfg.charDelay + cfg.lineGap;
+        });
+
+        // 4) 全部揭示完成回调
+        timers.push(setTimeout(function () {
+          if (typeof onComplete === 'function') onComplete();
+        }, elapsed));
+      }
+
+      function destroy() {
+        clearTimers();
+        // 还原各段文字与光标位置
+        segData.forEach(function (s) {
+          s.el.textContent = s.text;
+          if (s.cursor) {
+            s.cursor.classList.remove('cursor-hidden');
+            s.el.parentNode && s.el.parentNode.appendChild(s.cursor);
+          }
+        });
+        built = false;
+        segData = [];
+      }
+
+      return { init: init, destroy: destroy };
+    };
+  </script>
+
+  <!-- Hero 主标题：两行逐字揭示（模糊淡入），光标跟随，揭完按钮淡入 -->
+  <script>
+    (function () {
+      var line1 = document.querySelector('.hero-title-1 .type-text');
+      var line2 = document.querySelector('.hero-title-2 .type-text');
+      var cursor1 = document.querySelector('.cursor-blink[data-line="1"]');
+      var cursor2 = document.querySelector('.cursor-blink[data-line="2"]');
+      var btn = document.querySelector('.btn-cta');
+      if (!line1 || !line2 || !cursor1 || !cursor2) return;
+
+      var BTN_DELAY = 300;   // 揭完到按钮出现的停顿（ms）
+
+      var reveal = window.createMlbReveal({
+        segments: [
+          { el: line1, cursor: cursor1 },
+          { el: line2, cursor: cursor2 }
+        ],
+        onComplete: function () {
+          setTimeout(function () {
+            if (btn) btn.classList.remove('btn-cta-hidden');
+          }, BTN_DELAY);
+        }
+      });
+
+      // 暴露到全局，方便 SPA 卸载时调用 destroy()
+      window.heroTitleReveal = reveal;
+
+      // 等字体就绪再开始，避免拆字时宽度跳动
+      function start() { reveal.init(); }
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function () { setTimeout(start, 300); });
+      } else {
+        window.addEventListener('load', function () { setTimeout(start, 300); });
+      }
+    })();
+  </script>
+
+  <!-- 导航栏滚动隐藏/显示：向上滑（内容上移）隐藏，向下滑（内容下移）显示 -->
+  <script>
+    (function () {
+      var navbar = document.querySelector('.navbar');
+      if (!navbar) return;
+
+      var lastY = window.scrollY || 0;
+      var TOP_THRESHOLD = 80;   // 接近顶部时始终显示
+      var DELTA = 6;            // 抖动阈值，避免微小滚动来回闪
+
+      function onScroll() {
+        var y = window.scrollY || 0;
+        var diff = y - lastY;
+
+        // 顶部附近始终显示
+        if (y <= TOP_THRESHOLD) {
+          navbar.classList.remove('navbar-hidden');
+          lastY = y;
+          return;
+        }
+
+        if (Math.abs(diff) < DELTA) return;
+
+        if (diff > 0) {
+          // 向上滑（页面内容上移，scrollY 增大）→ 隐藏
+          navbar.classList.add('navbar-hidden');
+        } else {
+          // 向下滑（页面内容下移，scrollY 减小）→ 显示
+          navbar.classList.remove('navbar-hidden');
+        }
+        lastY = y;
+      }
+
+      window.addEventListener('scroll', function () {
+        window.requestAnimationFrame(onScroll);
+      }, { passive: true });
+    })();
+  </script>
+
+  <!-- 第二屏标题：滚动进入视口时逐字揭示（模糊淡入），光标跟随 -->
+  <script>
+    (function () {
+      var line = document.querySelector('.scroll-type');
+      var cursor = document.querySelector('.scroll-cursor');
+      if (!line || !cursor) return;
+
+      var reveal = window.createMlbReveal({
+        segments: [{ el: line, cursor: cursor }]
+      });
+      window.scrollLineReveal = reveal;
+
+      var started = false;
+      function trigger() {
+        if (started) return;
+        started = true;
+        reveal.init();
+      }
+
+      // 滚动进入视口时触发一次
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) { trigger(); io.disconnect(); }
+          });
+        }, { threshold: 0.6 });
+        io.observe(line.parentNode);
+      } else {
+        // 兜底：滚动监听
+        window.addEventListener('scroll', function () {
+          var rect = line.parentNode.getBoundingClientRect();
+          if (rect.top < window.innerHeight * 0.8) trigger();
+        }, { passive: true });
+      }
+    })();
+  </script>
+
+  <!-- 数据卡片：进入视口逐张浮现 -->
+  <script>
+    (function () {
+      var cards = document.querySelectorAll('.stat-card');
+      if (!cards.length) return;
+
+      var shown = false;
+      function reveal() {
+        if (shown) return;
+        shown = true;
+        cards.forEach(function (card, idx) {
+          // 1) 先淡入上浮（背面朝上）
+          setTimeout(function () {
+            card.classList.add('stat-show');
+          }, idx * 160);
+          // 2) 稍后翻转到正面（逐张错开）
+          setTimeout(function () {
+            card.classList.add('flipped');
+          }, 500 + idx * 220);
+        });
+      }
+
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) { reveal(); io.disconnect(); }
+          });
+        }, { threshold: 0.25 });
+        io.observe(cards[0].parentNode);
+      } else {
+        window.addEventListener('scroll', function () {
+          var rect = cards[0].parentNode.getBoundingClientRect();
+          if (rect.top < window.innerHeight * 0.85) reveal();
+        }, { passive: true });
+      }
+    })();
+  </script>
+
+  <!-- 第三屏标题：滚动进入视口时逐字揭示（模糊淡入），黑色段→紫色段共享光标，完成后副标题淡入 -->
+  <script>
+    (function () {
+      var screen3 = document.querySelector('.screen3');
+      if (!screen3) return;
+      var dark = screen3.querySelector('.s3-dark');
+      var grad = screen3.querySelector('.s3-grad');
+      var cursor = screen3.querySelector('.screen3-cursor');
+      var sub = screen3.querySelector('.screen3-sub');
+      if (!dark || !grad) return;
+
+      var DARK_TEXT = '有电脑就能播，';
+      var GRAD_TEXT = '三步搞定直播间';
+      var SUB_DELAY = 300;   // 揭完到副标题淡入的停顿（ms）
+
+      // 文字来源放到 data-text，交给统一揭示库拆字
+      dark.setAttribute('data-text', DARK_TEXT);
+      grad.setAttribute('data-text', GRAD_TEXT);
+
+      // 黑色段、紫色段作为顺序两段，共享同一个光标随揭示进度移动
+      var reveal = window.createMlbReveal({
+        segments: [
+          { el: dark, cursor: cursor },
+          { el: grad, cursor: cursor }
+        ],
+        onComplete: function () {
+          setTimeout(function () {
+            if (sub) sub.classList.add('s3-sub-show');
+          }, SUB_DELAY);
+        }
+      });
+      window.screen3Reveal = reveal;
+
+      var started = false;
+      function start() {
+        if (started) return;
+        started = true;
+        reveal.init();
+      }
+
+      // 滚动进入视口时触发一次
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) { start(); io.disconnect(); }
+          });
+        }, { threshold: 0.6 });
+        io.observe(screen3);
+      } else {
+        window.addEventListener('scroll', function () {
+          var rect = screen3.getBoundingClientRect();
+          if (rect.top < window.innerHeight * 0.8) start();
+        }, { passive: true });
+      }
+    })();
+  </script>
+
+  <!-- 生命游戏（细胞自动机）背景动效：白底透明 + 品牌紫低透明度，固定全屏铺最底层 -->
+  <script>
+    (function () {
+      /* ============================================================
+       * 可定制参数：改这里即可调整背景效果
+       * ============================================================ */
+      var LIFE_CONFIG = {
+        cellSize: 5,           // 单个细胞像素尺寸（越大越稀疏）
+        stepInterval: 3,       // 每隔几帧推进一代（越大越慢）
+        seedDensity: 0.18,     // 初始/补种时随机存活概率
+        reseedThreshold: 0.04, // 存活密度低于此值时在中心补种
+        reseedRadius: 6,       // 中心补种半径（格）
+        fadeInAge: 6,          // 细胞从淡到浓所需的存活代数
+        // 品牌紫色（RGB），新生→成熟在两色间过渡
+        colorYoung: [155, 61, 255],  // #9b3dff
+        colorOld:   [90, 3, 255],    // #5a03ff
+        alphaMin: 0.05,        // 新生细胞透明度
+        alphaMax: 0.16,        // 成熟细胞透明度
+        resizeDebounce: 200    // resize 防抖（ms）
+      };
+
+      function createLifeBackground(canvasEl, config) {
+        var cfg = config;
+        var ctx = canvasEl.getContext('2d');
+        var dpr = Math.max(1, window.devicePixelRatio || 1);
+
+        var cols = 0, rows = 0;
+        var grid = null;   // Uint8Array：0/1 存活状态
+        var ages = null;   // Uint8Array：存活连续代数
+        var next = null;   // 双缓冲
+        var nextAges = null;
+        var frameCount = 0;
+        var rafId = null;
+        var resizeTimer = null;
+        var running = false;
+
+        function setupGrid() {
+          // 尺寸跟随 canvas 容器（hero 区），而非整个窗口
+          var w = canvasEl.clientWidth || canvasEl.offsetWidth || window.innerWidth;
+          var h = canvasEl.clientHeight || canvasEl.offsetHeight || window.innerHeight;
+          canvasEl.width = Math.floor(w * dpr);
+          canvasEl.height = Math.floor(h * dpr);
+          canvasEl.style.width = w + 'px';
+          canvasEl.style.height = h + 'px';
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+          cols = Math.ceil(w / cfg.cellSize);
+          rows = Math.ceil(h / cfg.cellSize);
+          var n = cols * rows;
+          grid = new Uint8Array(n);
+          ages = new Uint8Array(n);
+          next = new Uint8Array(n);
+          nextAges = new Uint8Array(n);
+          for (var i = 0; i < n; i++) {
+            if (Math.random() < cfg.seedDensity) { grid[i] = 1; ages[i] = 1; }
+          }
+        }
+
+        function idx(x, y) { return y * cols + x; }
+
+        function neighbors(x, y) {
+          var c = 0;
+          for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              var nx = (x + dx + cols) % cols;
+              var ny = (y + dy + rows) % rows;
+              c += grid[idx(nx, ny)];
+            }
+          }
+          return c;
+        }
+
+        function stepGeneration() {
+          var alive = 0;
+          for (var y = 0; y < rows; y++) {
+            for (var x = 0; x < cols; x++) {
+              var i = idx(x, y);
+              var n = neighbors(x, y);
+              var was = grid[i];
+              var now = (was && (n === 2 || n === 3)) || (!was && n === 3) ? 1 : 0;
+              next[i] = now;
+              if (now) {
+                nextAges[i] = was ? Math.min(255, ages[i] + 1) : 1;
+                alive++;
+              } else {
+                nextAges[i] = 0;
+              }
+            }
+          }
+          // 双缓冲交换
+          var tg = grid; grid = next; next = tg;
+          var ta = ages; ages = nextAges; nextAges = ta;
+
+          // 密度过低时在中心补种，保持画面持续呼吸
+          if (alive / (cols * rows) < cfg.reseedThreshold) {
+            var cx = (cols / 2) | 0, cy = (rows / 2) | 0, r = cfg.reseedRadius;
+            for (var sy = -r; sy <= r; sy++) {
+              for (var sx = -r; sx <= r; sx++) {
+                if (Math.random() < cfg.seedDensity) {
+                  var gx = (cx + sx + cols) % cols;
+                  var gy = (cy + sy + rows) % rows;
+                  var gi = idx(gx, gy);
+                  if (!grid[gi]) { grid[gi] = 1; ages[gi] = 1; }
+                }
+              }
+            }
+          }
+        }
+
+        function draw() {
+          // 透明清屏：露出 body 的白底
+          ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+          var cy0 = cfg.colorYoung, co0 = cfg.colorOld;
+          for (var y = 0; y < rows; y++) {
+            for (var x = 0; x < cols; x++) {
+              var i = idx(x, y);
+              if (!grid[i]) continue;
+              var t = Math.min(1, ages[i] / cfg.fadeInAge); // 0 新生 → 1 成熟
+              var r = Math.round(cy0[0] + (co0[0] - cy0[0]) * t);
+              var g = Math.round(cy0[1] + (co0[1] - cy0[1]) * t);
+              var b = Math.round(cy0[2] + (co0[2] - cy0[2]) * t);
+              var a = cfg.alphaMin + (cfg.alphaMax - cfg.alphaMin) * t;
+              ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+              ctx.fillRect(
+                x * cfg.cellSize, y * cfg.cellSize,
+                cfg.cellSize - 1, cfg.cellSize - 1
+              );
+            }
+          }
+        }
+
+        function loop() {
+          if (!running) return;
+          frameCount++;
+          if (frameCount % cfg.stepInterval === 0) stepGeneration();
+          draw();
+          rafId = window.requestAnimationFrame(loop);
+        }
+
+        function onResize() {
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(function () {
+            dpr = Math.max(1, window.devicePixelRatio || 1);
+            setupGrid();
+            draw();
+          }, cfg.resizeDebounce);
+        }
+
+        return {
+          init: function () {
+            if (running) return;
+            setupGrid();
+            window.addEventListener('resize', onResize, { passive: true });
+            running = true;
+            rafId = window.requestAnimationFrame(loop);
+          },
+          destroy: function () {
+            running = false;
+            if (rafId) { window.cancelAnimationFrame(rafId); rafId = null; }
+            if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
+            window.removeEventListener('resize', onResize);
+            grid = ages = next = nextAges = null;
+            ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+          }
+        };
+      }
+
+      var canvasEl = document.getElementById('lifeBgCanvas');
+      if (canvasEl) {
+        // 尊重用户的“减少动效”系统偏好
+        var reduceMotion = window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var life = createLifeBackground(canvasEl, LIFE_CONFIG);
+        // 暴露到全局，方便 SPA 框架在路由切换时手动 destroy()/init()
+        window.lifeBackground = life;
+        if (!reduceMotion) life.init();
+      }
+    })();
+  </script>
+
+</body>
+</html>
