@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D 数字人白模 - 光晕折射</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+    }
+  }
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #ffffff; overflow-x: hidden; }
+    .spacer {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, "PingFang SC", sans-serif;
+      font-size: 24px;
+      color: #ccc;
+    }
+    .screen5-model {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      overflow: hidden;
+      background: #ffffff;
+    }
+    .screen5-model-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+    #controlPanel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 16px 20px;
+      width: 280px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+      font-family: -apple-system, "PingFang SC", sans-serif;
+      font-size: 13px;
+      color: #333;
+      pointer-events: auto;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
+    #controlPanel h3 { margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #111; }
+    #controlPanel label {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px; gap: 8px;
+    }
+    #controlPanel input[type="range"] { flex: 1; max-width: 120px; accent-color: #8b7cf7; }
+    #controlPanel input[type="color"] {
+      width: 32px; height: 24px; border: 1px solid #ddd;
+      border-radius: 4px; cursor: pointer; padding: 0;
+    }
+    #controlPanel span {
+      min-width: 36px; text-align: right; font-size: 12px;
+      color: #666; font-variant-numeric: tabular-nums;
+    }
+    #controlPanel hr { border: none; border-top: 1px solid #eee; margin: 12px 0; }
+    #controlPanel button {
+      width: 100%; padding: 8px; border: 1px solid #ddd;
+      border-radius: 6px; background: #fafafa; cursor: pointer;
+      font-size: 13px; transition: background 0.2s;
+    }
+    #controlPanel button:hover { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+
+  <div class="spacer">↓ 向下滚动查看效果 ↓</div>
+
+  <section class="screen5-model">
+    <canvas class="screen5-model-canvas" id="modelCanvas"></canvas>
+    <div id="controlPanel">
+      <h3>模型参数</h3>
+      <label>白模颜色 <input type="color" id="ctrl-baseColor" value="#f5f5f5"></label>
+      <label>环境光强度 <input type="range" id="ctrl-ambient" min="0" max="1" step="0.05" value="0.9"> <span id="val-ambient">0.9</span></label>
+      <label>主光强度 <input type="range" id="ctrl-keyLight" min="0" max="5" step="0.1" value="1.8"> <span id="val-keyLight">1.8</span></label>
+      <label>补光强度 <input type="range" id="ctrl-fillLight" min="0" max="2" step="0.05" value="0.2"> <span id="val-fillLight">0.2</span></label>
+      <hr>
+      <h3>反光质感</h3>
+      <label>高光强度 <input type="range" id="ctrl-specular" min="0" max="2" step="0.05" value="0.5"> <span id="val-specular">0.5</span></label>
+      <label>高光锐度 <input type="range" id="ctrl-shininess" min="2" max="128" step="1" value="32"> <span id="val-shininess">32</span></label>
+      <label>菲涅尔强度 <input type="range" id="ctrl-fresnel" min="0" max="2" step="0.05" value="0.3"> <span id="val-fresnel">0.3</span></label>
+      <label>菲涅尔指数 <input type="range" id="ctrl-fresnelPow" min="1" max="8" step="0.5" value="3"> <span id="val-fresnelPow">3</span></label>
+      <hr>
+      <h3>光晕折射</h3>
+      <label>折射强度 <input type="range" id="ctrl-iriIntensity" min="0" max="1.0" step="0.02" value="0.35"> <span id="val-iriIntensity">0.35</span></label>
+      <label>薄膜厚度 <input type="range" id="ctrl-filmThickness" min="200" max="800" step="10" value="400"> <span id="val-filmThickness">400</span></label>
+      <label>厚度变化 <input type="range" id="ctrl-thicknessVar" min="0" max="400" step="10" value="150"> <span id="val-thicknessVar">150</span></label>
+      <label>边缘集中 <input type="range" id="ctrl-edgeBias" min="0.5" max="5.0" step="0.1" value="2.0"> <span id="val-edgeBias">2.0</span></label>
+      <label>流动速度 <input type="range" id="ctrl-iriSpeed" min="0" max="2.0" step="0.05" value="0.4"> <span id="val-iriSpeed">0.4</span></label>
+      <label>色散扩展 <input type="range" id="ctrl-dispersion" min="0.5" max="3.0" step="0.1" value="1.2"> <span id="val-dispersion">1.2</span></label>
+      <hr>
+      <h3>扫描网格</h3>
+      <label>网格颜色 <input type="color" id="ctrl-gridColor" value="#8b7cf7"></label>
+      <label>网格密度 <input type="range" id="ctrl-gridDensity" min="5" max="80" step="1" value="12"> <span id="val-gridDensity">12</span></label>
+      <label>网格线宽 <input type="range" id="ctrl-gridLineWidth" min="0.005" max="0.2" step="0.005" value="0.01"> <span id="val-gridLineWidth">0.01</span></label>
+      <label>网格强度 <input type="range" id="ctrl-gridIntensity" min="0" max="1" step="0.05" value="0.25"> <span id="val-gridIntensity">0.25</span></label>
+      <label>扫描速度 <input type="range" id="ctrl-scanSpeed" min="0" max="3.0" step="0.1" value="1.9"> <span id="val-scanSpeed">1.9</span></label>
+      <label>扫描宽度 <input type="range" id="ctrl-scanWidth" min="0.05" max="0.5" step="0.01" value="0.27"> <span id="val-scanWidth">0.27</span></label>
+      <hr>
+      <button id="btn-export">导出当前参数</button>
+      <pre id="paramOutput" style="font-size:11px;max-height:120px;overflow:auto;margin-top:8px;display:none;"></pre>
+    </div>
+  </section>
+
+  <div class="spacer">↑ 向上滚动回看 ↑</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+    (function () {
+      const canvas = document.getElementById('modelCanvas');
+      if (!canvas) return;
+
+      const section = canvas.closest('.screen5-model');
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setClearColor(0xffffff, 1);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xffffff);
+      const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
+
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      keyLight.position.set(-3, 4, 3);
+      scene.add(keyLight);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+      scene.add(ambientLight);
+
+      const fillLight = new THREE.DirectionalLight(0xffffff, 0.2);
+      fillLight.position.set(2, -1, 1);
+      scene.add(fillLight);
+
+      // Uniforms
+      const uniforms = {
+        time: { value: 0 },
+        baseColor: { value: new THREE.Color(0xf5f5f5) },
+        ambientStrength: { value: 0.9 },
+        specularStrength: { value: 0.5 },
+        shininess: { value: 32.0 },
+        fresnelStrength: { value: 0.3 },
+        fresnelPow: { value: 3.0 },
+        // 光晕折射（薄膜干涉）
+        iriIntensity: { value: 0.35 },
+        filmThickness: { value: 400.0 },
+        thicknessVar: { value: 150.0 },
+        edgeBias: { value: 2.0 },
+        iriSpeed: { value: 0.4 },
+        dispersion: { value: 1.2 },
+        scrollProgress: { value: 0.0 },
+        // 扫描网格
+        gridColor: { value: new THREE.Color(0x8b7cf7) },
+        gridDensity: { value: 12.0 },
+        gridLineWidth: { value: 0.01 },
+        gridIntensity: { value: 0.25 },
+        scanSpeed: { value: 1.9 },
+        scanWidth: { value: 0.27 },
+        // 模型范围
+        modelYMin: { value: -0.6 },
+        modelYMax: { value: 0.6 }
+      };
+
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        transparent: true,
+        vertexShader: `
+          varying vec3 vNormal;
+          varying vec3 vWorldPosition;
+          varying vec3 vViewDir;
+          varying vec3 vWorldNormal;
+          void main() {
+            vNormal = normalize(normalMatrix * normal);
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPosition = worldPos.xyz;
+            vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+            vViewDir = normalize(cameraPosition - worldPos.xyz);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float time;
+          uniform vec3 baseColor;
+          uniform float ambientStrength;
+          uniform float specularStrength;
+          uniform float shininess;
+          uniform float fresnelStrength;
+          uniform float fresnelPow;
+
+          // 光晕折射参数
+          uniform float iriIntensity;
+          uniform float filmThickness;
+          uniform float thicknessVar;
+          uniform float edgeBias;
+          uniform float iriSpeed;
+          uniform float dispersion;
+          uniform float scrollProgress;
+
+          // 扫描网格
+          uniform vec3 gridColor;
+          uniform float gridDensity;
+          uniform float gridLineWidth;
+          uniform float gridIntensity;
+          uniform float scanSpeed;
+          uniform float scanWidth;
+
+          uniform float modelYMin;
+          uniform float modelYMax;
+
+          varying vec3 vNormal;
+          varying vec3 vWorldPosition;
+          varying vec3 vViewDir;
+          varying vec3 vWorldNormal;
+
+          // 将波长(nm)转换为可见光RGB颜色
+          // 基于高斯拟合人眼光谱响应
+          vec3 wavelengthToRGB(float wavelength) {
+            // 归一化到 0-1 范围 (380nm - 780nm)
+            float w = clamp((wavelength - 380.0) / 400.0, 0.0, 1.0);
+
+            // 红色峰值约 650nm
+            float r = exp(-pow((w - 0.75) * 3.5, 2.0));
+            // 绿色峰值约 550nm
+            float g = exp(-pow((w - 0.45) * 3.0, 2.0));
+            // 蓝色峰值约 450nm
+            float b = exp(-pow((w - 0.15) * 3.5, 2.0));
+
+            return vec3(r, g, b);
+          }
+
+          // 薄膜干涉：根据光程差计算干涉颜色
+          // 原理：2 * n * d * cos(theta) = m * lambda
+          // 当满足条件时，对应波长的光发生建设性干涉
+          vec3 thinFilmInterference(float cosTheta, float thickness) {
+            // 薄膜折射率 (类似肥皂膜 ~1.33)
+            float n = 1.33;
+
+            // 光程差 = 2 * n * d * cos(refracted angle)
+            // 使用 Snell's law: sin(theta_i) = n * sin(theta_r)
+            float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+            float sinThetaR = sinTheta / n;
+            float cosThetaR = sqrt(1.0 - sinThetaR * sinThetaR);
+
+            // 光程差 (nm)
+            float opticalPath = 2.0 * n * thickness * cosThetaR;
+
+            // 对多个干涉级次进行采样，产生更丰富的色彩
+            vec3 color = vec3(0.0);
+
+            // 采样多个波长，计算干涉强度
+            for (float i = 0.0; i < 3.0; i += 1.0) {
+              float order = i + 1.0;
+              // 满足建设性干涉的波长
+              float lambda = opticalPath / order;
+
+              // 只取可见光范围内的波长
+              if (lambda >= 380.0 && lambda <= 780.0) {
+                // 干涉强度随级次衰减
+                float intensity = 1.0 / (order * 0.7 + 0.3);
+                color += wavelengthToRGB(lambda) * intensity;
+              }
+            }
+
+            // 额外：用连续光谱模拟更平滑的色散
+            // 对光程差取模得到相位，映射到彩虹色
+            float phase = mod(opticalPath * dispersion / 550.0, 1.0) * 400.0 + 380.0;
+            vec3 spectralColor = wavelengthToRGB(phase);
+
+            // 混合离散干涉和连续色散
+            color = mix(spectralColor, color, 0.4);
+
+            return color;
+          }
+
+          // 简单的3D噪声（用于厚度变化）
+          float hash(vec3 p) {
+            p = fract(p * vec3(443.897, 441.423, 437.195));
+            p += dot(p, p.yzx + 19.19);
+            return fract((p.x + p.y) * p.z);
+          }
+
+          float noise3D(vec3 p) {
+            vec3 i = floor(p);
+            vec3 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+
+            float n000 = hash(i);
+            float n100 = hash(i + vec3(1.0, 0.0, 0.0));
+            float n010 = hash(i + vec3(0.0, 1.0, 0.0));
+            float n110 = hash(i + vec3(1.0, 1.0, 0.0));
+            float n001 = hash(i + vec3(0.0, 0.0, 1.0));
+            float n101 = hash(i + vec3(1.0, 0.0, 1.0));
+            float n011 = hash(i + vec3(0.0, 1.0, 1.0));
+            float n111 = hash(i + vec3(1.0, 1.0, 1.0));
+
+            float nx00 = mix(n000, n100, f.x);
+            float nx10 = mix(n010, n110, f.x);
+            float nx01 = mix(n001, n101, f.x);
+            float nx11 = mix(n011, n111, f.x);
+
+            float nxy0 = mix(nx00, nx10, f.y);
+            float nxy1 = mix(nx01, nx11, f.y);
+
+            return mix(nxy0, nxy1, f.z);
+          }
+
+          void main() {
+            vec3 normal = normalize(vNormal);
+            vec3 viewDir = normalize(vViewDir);
+
+            // === 基础光照（白模）===
+            vec3 lightDir = normalize(vec3(-3.0, 4.0, 3.0));
+            float diff = max(dot(normal, lightDir), 0.0);
+            vec3 color = baseColor * (ambientStrength + diff * (1.0 - ambientStrength));
+
+            // Blinn-Phong 高光
+            vec3 halfDir = normalize(lightDir + viewDir);
+            float spec = pow(max(dot(normal, halfDir), 0.0), shininess);
+            color += vec3(1.0) * spec * specularStrength;
+
+            // 菲涅尔边缘光
+            float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), fresnelPow);
+            color += vec3(1.0) * fresnel * fresnelStrength;
+
+            // === 光晕折射（薄膜干涉）===
+            float NdotV = max(dot(normal, viewDir), 0.0);
+
+            // 使用世界空间位置 + 时间产生流动的厚度变化
+            vec3 noiseCoord = vWorldPosition * 3.0 + vec3(time * iriSpeed * 0.3, time * iriSpeed * 0.2, time * iriSpeed * 0.1);
+            float thicknessNoise = noise3D(noiseCoord);
+
+            // 再加一层更大尺度的噪声，产生大范围的色彩漂移
+            vec3 noiseCoord2 = vWorldPosition * 1.2 + vec3(time * iriSpeed * 0.15, -time * iriSpeed * 0.1, time * iriSpeed * 0.05);
+            float thicknessNoise2 = noise3D(noiseCoord2);
+
+            // 混合两层噪声
+            float combinedNoise = mix(thicknessNoise, thicknessNoise2, 0.5);
+
+            // 计算当前点的薄膜厚度
+            // 滚动会偏移整体厚度，产生色相漂移效果
+            float scrollOffset = scrollProgress * 900.0;
+            float thickness = filmThickness + scrollOffset + thicknessVar * (combinedNoise * 2.0 - 1.0);
+
+            // 计算干涉颜色
+            vec3 iriColor = thinFilmInterference(NdotV, thickness);
+
+            // 边缘增强：光晕折射在边缘（掠射角）更明显
+            // 这符合物理规律：掠射角时薄膜干涉效果更强
+            float edgeFactor = pow(1.0 - NdotV, edgeBias);
+
+            // 同时在高光区域也略微可见（模拟光线折射散射）
+            float specHighlight = pow(max(dot(normal, halfDir), 0.0), shininess * 0.5) * 0.3;
+
+            // 综合遮罩：边缘为主 + 少量高光区域
+            float iriMask = edgeFactor + specHighlight;
+            iriMask = clamp(iriMask, 0.0, 1.0);
+
+            // 将干涉色作为叠加光晕，不改变白模底色
+            // 使用 additive blending 但限制最大贡献
+            vec3 iriContribution = iriColor * iriMask * iriIntensity;
+            iriContribution = min(iriContribution, vec3(0.4)); // 防止过曝
+
+            color += iriContribution;
+
+            // === 扫描网格 ===
+            float normalizedY = (vWorldPosition.y - modelYMin) / (modelYMax - modelYMin);
+            normalizedY = clamp(normalizedY, 0.0, 1.0);
+
+            // 扫描线位置（循环往复）
+            float scanPos = fract(time * scanSpeed * 0.5);
+            float scanDist = abs(normalizedY - scanPos);
+            // 处理循环边界
+            scanDist = min(scanDist, 1.0 - scanDist);
+            float scanMask = smoothstep(scanWidth, 0.0, scanDist);
+
+            // 网格线（明确的横竖交叉线）— 滚动时网格垂直视差偏移
+            float parallaxOffset = scrollProgress * 1.0;
+            float coordY = (vWorldPosition.y + parallaxOffset) * gridDensity;
+            float coordX = vWorldPosition.x * gridDensity;
+            float lineY = 1.0 - step(gridLineWidth, abs(fract(coordY) - 0.5));
+            float lineX = 1.0 - step(gridLineWidth, abs(fract(coordX) - 0.5));
+            float grid = max(lineY, lineX);
+
+            // 网格只在扫描线附近可见，并且整体叠加一层淡淡的底网格
+            float gridAlpha = grid * (scanMask * 0.7 + 0.3) * gridIntensity;
+            // 网格颜色使用光晕折射的干涉色（取满亮度的干涉色）
+            vec3 iriColorBright = normalize(iriColor + 0.01) * 1.2;
+            vec3 gridFinalColor = mix(gridColor, iriColorBright, 0.7);
+            color += gridFinalColor * gridAlpha;
+
+            // 滚动透明度：从 0 渐入到 1
+            float fadeIn = smoothstep(0.0, 0.5, scrollProgress);
+            gl_FragColor = vec4(color, fadeIn);
+          }
+        `
+      });
+
+      let modelYMin = -0.6;
+      let modelYMax = 0.6;
+      let modelLoaded = false;
+
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/libs/draco/');
+      const loader = new GLTFLoader();
+      loader.setDRACOLoader(dracoLoader);
+
+      loader.load('assets/digital-human.glb', function (gltf) {
+        const model = gltf.scene;
+        model.traverse(function (child) {
+          if (child.isMesh) {
+            child.material = material;
+            child.castShadow = false;
+            child.receiveShadow = false;
+          }
+        });
+
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+
+        model.position.sub(center);
+        scene.add(model);
+
+        modelYMin = -size.y / 2;
+        modelYMax = size.y / 2;
+        uniforms.modelYMin.value = modelYMin;
+        uniforms.modelYMax.value = modelYMax;
+
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const fov = camera.fov * (Math.PI / 180);
+        const dist = maxDim / (2 * Math.tan(fov / 2)) * 1.2;
+        camera.position.set(0, 0, dist);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+
+        modelLoaded = true;
+      });
+
+      // ===== 鼠标跟随旋转 =====
+      const maxRotation = 10 * (Math.PI / 180); // 最大旋转角度 10°
+      let targetRotationY = 0;
+      let currentRotationY = 0;
+
+      window.addEventListener('mousemove', (e) => {
+        // 鼠标 x 位置映射到 [-1, 1]
+        const mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+        // 映射到最大旋转角度范围
+        targetRotationY = mouseX * maxRotation;
+      });
+
+      // 滚动驱动光晕折射变化
+      function updateScroll() {
+        const rect = section.getBoundingClientRect();
+        const viewH = window.innerHeight;
+        const progress = 1 - (rect.bottom / (viewH + rect.height));
+        const clampedProgress = Math.max(0, Math.min(1, progress));
+        uniforms.scrollProgress.value = clampedProgress;
+      }
+      window.addEventListener('scroll', updateScroll, { passive: true });
+      updateScroll();
+
+      // 尺寸适配
+      function resize() {
+        const rect = section.getBoundingClientRect();
+        renderer.setSize(rect.width, rect.height);
+        camera.aspect = rect.width / rect.height;
+        camera.updateProjectionMatrix();
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      // ===== 调参面板 =====
+      const bind = (id, fn) => document.getElementById(id).addEventListener('input', fn);
+
+      bind('ctrl-baseColor', (e) => uniforms.baseColor.value.set(e.target.value));
+      bind('ctrl-ambient', (e) => { uniforms.ambientStrength.value = +e.target.value; document.getElementById('val-ambient').textContent = e.target.value; });
+      bind('ctrl-keyLight', (e) => { keyLight.intensity = +e.target.value; document.getElementById('val-keyLight').textContent = e.target.value; });
+      bind('ctrl-fillLight', (e) => { fillLight.intensity = +e.target.value; document.getElementById('val-fillLight').textContent = e.target.value; });
+      bind('ctrl-specular', (e) => { uniforms.specularStrength.value = +e.target.value; document.getElementById('val-specular').textContent = e.target.value; });
+      bind('ctrl-shininess', (e) => { uniforms.shininess.value = +e.target.value; document.getElementById('val-shininess').textContent = e.target.value; });
+      bind('ctrl-fresnel', (e) => { uniforms.fresnelStrength.value = +e.target.value; document.getElementById('val-fresnel').textContent = e.target.value; });
+      bind('ctrl-fresnelPow', (e) => { uniforms.fresnelPow.value = +e.target.value; document.getElementById('val-fresnelPow').textContent = e.target.value; });
+
+      // 扫描网格
+      bind('ctrl-gridColor', (e) => uniforms.gridColor.value.set(e.target.value));
+      bind('ctrl-gridDensity', (e) => { uniforms.gridDensity.value = +e.target.value; document.getElementById('val-gridDensity').textContent = e.target.value; });
+      bind('ctrl-gridLineWidth', (e) => { uniforms.gridLineWidth.value = +e.target.value; document.getElementById('val-gridLineWidth').textContent = e.target.value; });
+      bind('ctrl-gridIntensity', (e) => { uniforms.gridIntensity.value = +e.target.value; document.getElementById('val-gridIntensity').textContent = e.target.value; });
+      bind('ctrl-scanSpeed', (e) => { uniforms.scanSpeed.value = +e.target.value; document.getElementById('val-scanSpeed').textContent = e.target.value; });
+      bind('ctrl-scanWidth', (e) => { uniforms.scanWidth.value = +e.target.value; document.getElementById('val-scanWidth').textContent = e.target.value; });
+
+
+      // 光晕折射
+      bind('ctrl-iriIntensity', (e) => { uniforms.iriIntensity.value = +e.target.value; document.getElementById('val-iriIntensity').textContent = e.target.value; });
+      bind('ctrl-filmThickness', (e) => { uniforms.filmThickness.value = +e.target.value; document.getElementById('val-filmThickness').textContent = e.target.value; });
+      bind('ctrl-thicknessVar', (e) => { uniforms.thicknessVar.value = +e.target.value; document.getElementById('val-thicknessVar').textContent = e.target.value; });
+      bind('ctrl-edgeBias', (e) => { uniforms.edgeBias.value = +e.target.value; document.getElementById('val-edgeBias').textContent = e.target.value; });
+      bind('ctrl-iriSpeed', (e) => { uniforms.iriSpeed.value = +e.target.value; document.getElementById('val-iriSpeed').textContent = e.target.value; });
+      bind('ctrl-dispersion', (e) => { uniforms.dispersion.value = +e.target.value; document.getElementById('val-dispersion').textContent = e.target.value; });
+
+      // 导出
+      document.getElementById('btn-export').addEventListener('click', () => {
+        const params = {
+          baseColor: '#' + uniforms.baseColor.value.getHexString(),
+          keyLightIntensity: keyLight.intensity,
+          fillLightIntensity: fillLight.intensity,
+          ambientStrength: uniforms.ambientStrength.value,
+          specularStrength: uniforms.specularStrength.value,
+          shininess: uniforms.shininess.value,
+          fresnelStrength: uniforms.fresnelStrength.value,
+          fresnelPow: uniforms.fresnelPow.value,
+          iriIntensity: uniforms.iriIntensity.value,
+          filmThickness: uniforms.filmThickness.value,
+          thicknessVar: uniforms.thicknessVar.value,
+          edgeBias: uniforms.edgeBias.value,
+          iriSpeed: uniforms.iriSpeed.value,
+          dispersion: uniforms.dispersion.value,
+          gridColor: '#' + uniforms.gridColor.value.getHexString(),
+          gridDensity: uniforms.gridDensity.value,
+          gridLineWidth: uniforms.gridLineWidth.value,
+          gridIntensity: uniforms.gridIntensity.value,
+          scanSpeed: uniforms.scanSpeed.value,
+          scanWidth: uniforms.scanWidth.value,
+        };
+        const output = document.getElementById('paramOutput');
+        output.style.display = 'block';
+        output.textContent = JSON.stringify(params, null, 2);
+      });
+
+      // 渲染循环
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        uniforms.time.value += delta;
+
+        // 平滑插值旋转（缓动）
+        currentRotationY += (targetRotationY - currentRotationY) * 0.05;
+        scene.rotation.y = currentRotationY;
+
+        renderer.render(scene, camera);
+      }
+      animate();
+    })();
+  </script>
+
+</body>
+</html>

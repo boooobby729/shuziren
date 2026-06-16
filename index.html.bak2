@@ -176,11 +176,12 @@
     }
 
     /* 滚动动画预留空间：为光晕放大上移 + 卡片视差离场提供行程。
-       2000px 已覆盖光晕动画(约 2*vh+800px 完成)与卡片滚出视口，
-       同时不把第三屏在整页中推得过靠后（缩短后第三屏更早出现、整页更紧凑）。 */
+       高度即「卡片之后到第三屏标题之间的空滚行程」。从 2000px 缩到 1000px，
+       使卡片离场后紧接着进入第三屏吸附区——配合脚本里「卡片滑出视口即触发标题」，
+       实现「卡片走 → 标题来」的无缝衔接，不再留出近 900px 的大段空白。 */
     .scroll-zone {
       position: relative;
-      height: 2000px;
+      height: 1000px;
       background: transparent;
     }
 
@@ -457,14 +458,18 @@ background-size: 200% 100%;
     ============================================= */
     .s3-pin-zone {
       position: relative;
-      /* 总高 = 1 个视口(sticky 占位) + 行程。行程 = zoneH - 100vh。
-         180vh → 行程 80vh：动画在 p≈0.7 完成，滚动紧凑跳手，
-         同时不把第三屏在整页中推得过低（避免模块整体位置下沉）。 */
-      height: 180vh;
+      /* 总高 = 1 个视口(sticky 占位) + 钉住行程。钉住行程 = zoneH - 100vh，
+         这段行程被 update() 用作整段叙事进度 p（p = -zone.rect.top / DRIVE_DISTANCE）。
+         加高到 360vh：保证 stage 钉住期间有 ≥ DRIVE_DISTANCE(+缓冲) 的可滚行程，
+         让“半立预览(p=0) → 逐字消失/换标题/底图上移立正(p=1)”能完整滚完，
+         且打字机(时间驱动)有足够的钉住前置空间播完。 */
+      height: 360vh;
       background: transparent;
       z-index: 2;
     }
-    /* 终点缓冲：pin-zone 之后的少量滚动空间，保证叙事能滚到 p=1 后略留缓冲再过场到下一屏 */
+    /* 终点缓冲：pin-zone 之后的少量滚动空间，叙事滚到 p=1 后略留缓冲再过场到下一屏。
+       注意：真正容纳 DRIVE 行程的是 pin-zone 自身高度（sticky stage 全程钉在 pin-zone 内）；
+       spacer 在 pin-zone 之后，stage 已 unpin，不能用来承载立正动画，故保持小高度即可。 */
     .s3-end-spacer {
       position: relative;
       height: 40vh;
@@ -475,9 +480,11 @@ background-size: 200% 100%;
       top: 0;
       height: 100vh;
       overflow: hidden;
-      /* 3D 透视：配合 .step-image 的 transform-origin:center bottom 产生梯形透视 */
-      perspective: 1100px;
-      perspective-origin: center 60%;
+      /* 3D 透视（参考 Tabbit，强化梯形感）：拉近 perspective 让近大远小更夸张，
+         perspective-origin 上提到 30%（视点偏上、俶视）让梯形更明显；
+         配合 .step-image 的 transform-origin:center bottom + rotateX 产生“立在桌面”的梯形透视。 */
+      perspective: 750px;
+      perspective-origin: center 30%;
     }
 
     .screen3 {
@@ -497,8 +504,13 @@ background-size: 200% 100%;
          否则快速下滑时变量已瞬间到 0、视觉却因 0.4s 过渡仍亮着，
          与正在淡入的新标题同屏可见 → 鬼影重叠。这里必须无 transition、严格跟手。 */
       --s3-fade: 1;
+      /* --s3-rise：旧标题随滚动向上滑动的位移(px，负值向上)，由 JS 在
+         p∈[0, HEAD_SWITCH_AT] 内从 0 线性写到 -100，使旧标题“滑到”新标题
+         所在高度(22vh-8px-100px)；到达阈值时旧标题消失、新标题在同一位置
+         原位出现，视觉连贯不跳位。 */
+      --s3-rise: 0px;
       opacity: var(--s3-fade);
-      transform: translateX(-50%) translateY(calc((1 - var(--s3-fade)) * -24px));
+      transform: translateX(-50%) translateY(calc((1 - var(--s3-fade)) * -24px + var(--s3-rise)));
     }
 
     .screen3-title {
@@ -567,13 +579,20 @@ background-size: 200% 100%;
       filter: blur(0);
     }
 
+    /* 标题「直接切换」时禁用逐字过渡：旧标题被硬隐藏/硬显示时不走 transition，
+       从而瞬间整体显隐，而不是随 CSS transition 渐隐（与“不随滚动渐变”一致）。 */
+    .screen3-title.s3-instant .mlb-char {
+      transition: none;
+    }
+
     /* 渐变标题段内拆出的字：所有字共用「整句宽度」的同一条渐变坐标系，
        每个字按自身在整句中的水平偏移（--mlb-grad-x）裁剪对应片段，
        拼起来是一条连续渐变（而不是每字各走一遍）。
        --mlb-grad-w 为整句像素宽度，由 JS 在拆字后写入。
        流动动画 mlbGradFlow 在每字偏移基础上整体平移，保持整句一起流动。 */
     .hero-title-2 .mlb-char,
-    .screen3-title .s3-grad .mlb-char {
+    .screen3-title .s3-grad .mlb-char,
+    .step-heading-name .mlb-char {
       --mlb-grad-x: 0px;
       --mlb-grad-w: 100%;
       color: transparent;
@@ -625,51 +644,88 @@ background-size: 200% 100%;
        随滚动淡入「原位接替」原第三屏标题。 */
     .step-heading {
       position: absolute;
-      /* 与旧标题（.screen3 top:22vh）做精确“原位替换”：钉在同一视口高度。
-         screen3-title 字号 48px、line-height 1.2 高约 58px，新标题含 8px 上下 padding，
-         用 calc(22vh - 8px) 使新旧标题文字基线对齐。 */
-      top: calc(22vh - 8px);
+      /* 新标题位置：在旧标题基线(22vh-8px)基础上再上移 100px，使定格态标题更靠上。
+         现在切换为「序贯逐字」：旧标题先逐字退场，新标题再在此位置逐字打出，
+         二者不再同屏，故无需白底遮罩。 */
+      top: calc(22vh - 8px - 100px);
       left: 50%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      white-space: nowrap;
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      z-index: 4;
+      /* 容器始终存在（透明背景）；显隐由内部 .mlb-char 逐字控制，
+         初始整体不可见 → 由 JS 在序列里逐字打出。 */
+      transform: translateX(-50%);
+      /* 默认隐藏整块，避免拆字前的空容器闪现；加 .step-heading-ready 后显示。 */
+      opacity: 0;
+    }
+
+    .step-heading.step-heading-ready {
+      opacity: 1;
+    }
+
+    /* 新标题光标：与第三屏旧标题光标同尺寸、同闪烁，随逐字进度前进/回退。 */
+    .step-heading-cursor {
+      display: inline-block;
+      height: 78px;
+      width: auto;
+      margin-left: 6px;
+      object-fit: contain;
+      vertical-align: middle;
+      flex-shrink: 0;
+      animation: cursorBlink 0.5s ease-in-out infinite;
+    }
+
+    /* “第一步”：与“选商品”同字号（标题体），黑色。 */
+    .step-heading-num {
+      font-size: 48px;
+      font-weight: 600;
+      color: #0c0024;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+    }
+
+    /* 标题行：两段横排、基线对齐、字间距 18px。 */
+    .step-heading-title {
       display: flex;
       align-items: baseline;
       justify-content: center;
-      white-space: nowrap;
       gap: 18px;
-      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
-      z-index: 4;                 /* 高于 .screen3(z:2)，淡入时压在旧标题之上 */
-      /* 不透明实底：淡入时彻底遮住下方正在淡出的旧标题，杜绝鬼影重叠。
-         背景横向扩出，确保覆盖原标题范围。 */
-      padding: 8px 56px;
-      background: #ffffff;
-      border-radius: 12px;
-      /* 初始隐藏，由 JS 写入 --step-head 进度做淡入。原位替换位移很小，避免“飘移”观感。
-         严禁加 CSS transition：进度已逐帧平滑，加了会与旧标题淡出不同步而重叠。 */
-      --step-head: 0;
-      opacity: var(--step-head);
-      transform: translateX(-50%) translateY(calc((1 - var(--step-head)) * 8px));
-      will-change: opacity, transform;
     }
 
-    .step-heading-num {
-      font-size: 28px;
-      font-weight: 600;
-      color: #9b6bff;
-      letter-spacing: 0.02em;
-    }
-
+    /* “选商品”：与“第一步”同字号，蓝紫色流动渐变（复用 titleGradientFlow）。 */
     .step-heading-name {
       font-size: 48px;
       font-weight: 600;
       letter-spacing: -0.01em;
-      color: #0c0024;
       line-height: 1.1;
+      background: linear-gradient(120deg, #4B1EFF, #6B3DFF, #9B6BFF, #6B3DFF, #4B1EFF);
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      animation: titleGradientFlow 4s linear infinite;
+    }
+
+    /* 新标题的副标题：风格与旧副标题 .screen3-sub 一致，跟随新标题一起淡入。 */
+    .step-heading-sub {
+      margin-top: 18px;
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 18px;
+      font-weight: 400;
+      color: #6b6480;
+      letter-spacing: 0.02em;
     }
 
 .step-row {
 /* 图片钉在视口中下部：立正后大致居中偏下，留出上方标题空间。
    --step-shift 由 JS 随进度写入：p=0 时大幅下移，使平躺图沉到屏幕最底端、
    只露出顶部一点点（“有电脑就能播”时图在屏幕底端）；p=1 归 0，图升到中部居中。 */
---step-shift: 130px;
+--step-shift: 40px;
 position: absolute;
 top: 38vh;
 left: 50%;
@@ -737,20 +793,24 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
       max-width: 1176px;   /* 容器够宽时最大 1176px，否则随容器自适应、始终居中不溢出 */
       /* 3D 透视：以底边为轴向后翻倒，随滚动“立起来”。
          变量由 JS 写入，平躺(大角度/下沉/缩小/模糊/半透明)→立起(0/原位/原大/清晰/不透明)。 */
-      --step-tilt: 72deg;        /* 倾角：绕底边后仰平躺。配合 stage 的 perspective:1100px，72° 产生梯形透视 */
-      --step-lift: 0px;          /* 下沉位移：sticky 方案下图片由 top:40vh 定位 + 大倾角自然落在视口中下部，lift 起点 0 */
-      --step-scale: 0.94;        /* 平躺时略缩小，立起回 1 */
-      --step-blur: 3px;          /* 平躺时轻微模糊，立起渐变清晰 */
-      --step-opacity: 0.7;       /* 标题屏内大面积可见（参考 Tabbit 露出大半张图），立起渐变不透明 */
+      --step-tilt: 22deg;        /* 倾角：梯形透视预览（须与 JS TILT_START 一致） */
+      --step-lift: 0px;          /* 下沉位移：图片由 top 定位 + 倾角自然落位，lift 起点 0（--step-shift 在 .step-row 上） */
+      --step-scale: 0.96;        /* 预览时略缩小，立起回 1 */
+      --step-blur: 1.2px;        /* 预览时极轻微模糊，立起渐变清晰 */
+      --step-opacity: 0.92;      /* 预览态已清晰可辨，立起渐变不透明 */
       /* 绕底边翻倒：平躺时图片顶部向屏幕深处倒下去、底边贴近视点，
-         顶边远、底边近 → 近大远小的梯形透视（躺在桌面上的观感），
-         立起时倾角回 0 自然正视。这是“压扁”与“真透视”的关键区别。 */
+         顶边远、底边近 → 近大远小的真梯形透视（屏幕躺在桌面上的观感）。
+         关键：用 transform 里前置的 perspective() 函数提供透视，
+         而不靠祖先 .s3-pin-stage 的 perspective——因为中间的 .step-row 用了
+         translate 且未开 preserve-3d，会把 3D 上下文压平、使 rotateX 退化为“竖向压扁”。
+         在本元素 transform 内用 perspective() 函数可绕过该问题，必定产生梯形。
+         立起时倾角回 0 自然正视。 */
       transform-origin: center bottom;
       transform:
+        perspective(1000px)
         translateY(var(--step-lift))
         rotateX(var(--step-tilt))
         scale(var(--step-scale));
-      transform-style: preserve-3d;
       opacity: var(--step-opacity);
       filter: blur(var(--step-blur));
       will-change: transform, opacity, filter;
@@ -988,11 +1048,15 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 
         <!-- 步骤 01：选商品 -->
         <div class="steps-section">
-          <!-- 新标题：随滚动原位淡入接替旧标题 -->
-          <div class="step-heading">
-            <span class="step-heading-num">第一步</span>
-            <span class="step-heading-name">选商品</span>
+        <!-- 新标题：旧标题逐字退场后，在同位置「逐字打出 + 光标前进」接替（与全站统一）。
+             num/name 两段文字交给统一揭示库拆字，共享一个 step-heading-cursor 光标。 -->
+        <div class="step-heading">
+          <div class="step-heading-title">
+            <span class="step-heading-num" data-text="第一步"></span>
+            <span class="step-heading-name" data-text="选商品"></span><img src="assets/cursor.png" alt="" class="step-heading-cursor cursor-hidden">
           </div>
+          <div class="step-heading-sub">选好直播间中所要售卖的商品，讲解词+卖点话术全自动生成</div>
+        </div>
           <div class="step-row">
             <div class="step-image">
               <img src="assets/step-1.png" alt="选商品后台界面">
@@ -1162,7 +1226,7 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
           chars.push(span);
         }
         // 判断本段是否为渐变文字段（需要整句连续渐变）
-        var isGrad = !!(el.closest && el.closest('.hero-title-2, .screen3-title .s3-grad'));
+        var isGrad = !!(el.closest && el.closest('.hero-title-2, .screen3-title .s3-grad, .step-heading-name'));
         return { el: el, cursor: seg.cursor || null, chars: chars, text: text, isGrad: isGrad };
       }
 
@@ -1258,7 +1322,145 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
         segData = [];
       }
 
-      return { init: init, destroy: destroy };
+      /* ============================================================
+       * 扩展能力：把控制器变成「可正放/可倒放、光标双向跟随」的引擎
+       * ------------------------------------------------------------
+       * - ensureBuilt()  仅拆字就位（不自动播放），供“先静默就绪、后由
+       *   外部时机触发出现/消失”的标题使用（如第三屏新标题）。
+       * - getCursor()    返回该控制器使用的光标元素（多段共享时取第一个）。
+       * - getChars()     返回按显示顺序拼好的全部字符 span。
+       * - showAllInstant() / hideAllInstant()  瞬时全显/全隐（无逐字、无光标动画）。
+       * - playReveal(onDone) 正向逐字出现：光标从头前进，字一个个亮起。
+       * - playHide(onDone)   逆序逐字消失：从末尾往前，字一个个隐去，
+       *                      光标“跟着退”停在剩余最后一个字之后；退到头光标藏起。
+       * 说明：出现/消失共用 .mlb-char 的 CSS transition（模糊+上浮+淡入），
+       *       因此「消失」自然是「出现」的逆放，全站观感统一。
+       * ============================================================ */
+
+      // 确保已拆字就位（但全部隐藏、不播放）。返回是否本次新建。
+      function ensureBuilt() {
+        if (built) return false;
+        built = true;
+        segData = segments.map(buildSegment);
+        segData.forEach(applyGradientCoords);
+        segData.forEach(function (s) {
+          if (s.cursor) s.cursor.classList.add('cursor-hidden');
+        });
+        return true;
+      }
+
+      // 主光标：多段共享同一光标时取第一个非空的
+      function getCursor() {
+        for (var i = 0; i < segData.length; i++) {
+          if (segData[i].cursor) return segData[i].cursor;
+        }
+        return null;
+      }
+
+      // 按显示顺序拼接所有字符 span
+      function getChars() {
+        var all = [];
+        segData.forEach(function (s) {
+          for (var i = 0; i < s.chars.length; i++) all.push(s.chars[i]);
+        });
+        return all;
+      }
+
+      // 瞬时全显（无逐字动画）：用于“应处于完整态”的初始/兜底场景
+      function showAllInstant() {
+        ensureBuilt();
+        getChars().forEach(function (c) { c.classList.add('mlb-visible'); });
+        var cur = getCursor();
+        if (cur) cur.classList.add('cursor-hidden'); // 完整态默认不留光标
+      }
+
+      // 瞬时全隐（无逐字动画）
+      function hideAllInstant() {
+        ensureBuilt();
+        getChars().forEach(function (c) { c.classList.remove('mlb-visible'); });
+        var cur = getCursor();
+        if (cur) cur.classList.add('cursor-hidden');
+      }
+
+      // 正向逐字出现 + 光标前进。playing 防重入；完成回调 onDone。
+      var playing = false;
+      function playReveal(onDone) {
+        ensureBuilt();
+        clearTimers();
+        playing = true;
+        var chars = getChars();
+        var cur = getCursor();
+        // 起步：所有字隐藏，光标显示并落在第一个字之前
+        chars.forEach(function (c) { c.classList.remove('mlb-visible'); });
+        if (cur) {
+          cur.classList.remove('cursor-hidden');
+          if (chars[0] && chars[0].parentNode) {
+            chars[0].parentNode.insertBefore(cur, chars[0]);
+          }
+        }
+        chars.forEach(function (span, ci) {
+          timers.push(setTimeout(function () {
+            span.classList.add('mlb-visible');
+            moveCursorAfter(cur, span); // 光标跟到刚打出的字之后
+          }, ci * cfg.charDelay));
+        });
+        timers.push(setTimeout(function () {
+          playing = false;
+          if (cur) cur.classList.add('cursor-hidden'); // 打完收起光标
+          if (typeof onDone === 'function') onDone();
+        }, chars.length * cfg.charDelay + 40));
+      }
+
+      // 逆序逐字消失 + 光标回退。从末尾往前一个个隐去，
+      // 光标始终停在“剩余可见的最后一个字”之后；全部退完后光标藏起。
+      function playHide(onDone) {
+        ensureBuilt();
+        clearTimers();
+        playing = true;
+        var chars = getChars();
+        var cur = getCursor();
+        var N = chars.length;
+        if (cur) {
+          cur.classList.remove('cursor-hidden');
+          // 光标先停到最后一个字之后
+          if (chars[N - 1]) moveCursorAfter(cur, chars[N - 1]);
+        }
+        for (var k = 0; k < N; k++) {
+          var idx = N - 1 - k; // 从末尾往前
+          timers.push(setTimeout((function (i) {
+            return function () {
+              chars[i].classList.remove('mlb-visible'); // 该字隐去
+              // 光标回退到“仍可见的最后一个字”之后；若已退到头则放到首字之前
+              if (cur) {
+                if (i > 0) moveCursorAfter(cur, chars[i - 1]);
+                else if (chars[0] && chars[0].parentNode) {
+                  chars[0].parentNode.insertBefore(cur, chars[0]);
+                }
+              }
+            };
+          })(idx), k * cfg.charDelay));
+        }
+        timers.push(setTimeout(function () {
+          playing = false;
+          if (cur) cur.classList.add('cursor-hidden'); // 退完收起光标
+          if (typeof onDone === 'function') onDone();
+        }, N * cfg.charDelay + 40));
+      }
+
+      function isPlaying() { return playing; }
+
+      return {
+        init: init,
+        destroy: destroy,
+        ensureBuilt: ensureBuilt,
+        getCursor: getCursor,
+        getChars: getChars,
+        showAllInstant: showAllInstant,
+        hideAllInstant: hideAllInstant,
+        playReveal: playReveal,
+        playHide: playHide,
+        isPlaying: isPlaying
+      };
     };
   </script>
 
@@ -1439,6 +1641,11 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
           { el: grad, cursor: cursor }
         ],
         onComplete: function () {
+          // 收集标题全部字符（按显示顺序：黑色段在前、渐变段在后），
+          // 供后续“逐字逆序消失”使用。逆序退场 = 从数组末尾往前移除 .mlb-visible。
+          var darkChars = Array.prototype.slice.call(dark.querySelectorAll('.mlb-char'));
+          var gradChars = Array.prototype.slice.call(grad.querySelectorAll('.mlb-char'));
+          window.__s3TitleChars = darkChars.concat(gradChars);
           setTimeout(function () {
             if (sub) sub.classList.add('s3-sub-show');
             // 打字机+副标题完整呈现后，开闸放行第二阶段叙事驱动，
@@ -1459,13 +1666,30 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
         reveal.init();
       }
 
-      // 触发位置：标题顶部上行到视口高度的 TRIGGER_RATIO 处即展开。
-      // 0.78 ≈ 标题滚到屏幕中下部偏上（即你截图的位置）就触发，比之前“整块 60% 进视口”早很多。
-      var TRIGGER_RATIO = 0.78;
+      // ====== 触发联动：绑定第二屏「数据卡片」离场 ======
+      // 需求：当第二屏卡片正在滑出屏幕（快走完、还没完全离场）时，
+      // 第三屏标题就开始淡入，做一点重叠衔接，而不是等卡片彻底走光才出现。
+      // 实现：监测 .stat-cards 卡片底边相对视口顶部的位置。卡片随页面上滚，
+      // 其底边 rect.bottom 会从“视口下方(大)”一路减小，越过视口顶部时 rect.bottom=0
+      // （此刻卡片完全离场）。我们在它还差 CARD_LEAVE_RATIO * 视口高 离场时就触发，
+      // 即卡片“快走完”那一刻标题开始出现 → 形成离场/入场的重叠衔接。
+      var cardsEl = document.querySelector('.stat-cards');
+      // 卡片底边距视口顶部还剩多少视口高度时触发（0.10 = 还剩 10% 屏高，即卡片快走完）。
+      // 调大 → 标题更早出现（重叠更多）；调小/为 0 → 卡片完全离场后才出现。
+      var CARD_LEAVE_RATIO = 0.10;
       function onScrollCheck() {
         if (started) return;
+        if (cardsEl) {
+          // 主逻辑：用卡片离场进度触发
+          var cr = cardsEl.getBoundingClientRect();
+          if (cr.bottom <= window.innerHeight * CARD_LEAVE_RATIO) {
+            start();
+          }
+          return;
+        }
+        // 兜底：万一找不到卡片元素，退回原“标题滚到视口 78%”逻辑，保证标题不会永不出现。
         var rect = screen3.getBoundingClientRect();
-        if (rect.top <= window.innerHeight * TRIGGER_RATIO) {
+        if (rect.top <= window.innerHeight * 0.78) {
           start(); // start() 内已置 started=true，rafLoop 下一帧自动停止
         }
       }
@@ -1494,6 +1718,8 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
       var row = document.querySelector('.steps-section .step-row');
       var screen3 = document.querySelector('.screen3');
       var heading = document.querySelector('.steps-section .step-heading');
+      var oldSub = document.querySelector('.screen3-sub'); // 旧副标题，随旧标题一同退场
+      var oldTitle = document.querySelector('.screen3-title'); // 旧标题容器，硬切换时禁用逐字过渡
       var zone = document.querySelector('.s3-pin-zone');
       if (!img || !screen3 || !zone) return;
 
@@ -1501,15 +1727,30 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
        * 可定制参数
        * ============================================================ */
       // 图片立起（透视）—— 起止值需与 CSS 初始变量一致
-      var TILT_START = 72,   TILT_END = 0;      // 倾角：平躺(绕底边后仰) → 正视（与 CSS 一致）
-      var LIFT_START = 0,    LIFT_END = 0;      // sticky 方案下图片由 top:40vh 定位 + 72° 平躺透视自然落在视口中下部，无需 lift 位移
-      var SCALE_START = 0.94, SCALE_END = 1;    // 缩放：平躺略小 → 原大
-      var BLUR_START = 3,    BLUR_END = 0;      // 模糊(px)：平躺模糊 → 立起清晰
-      var OPACITY_START = 0.7, OPACITY_END = 1; // 透明度：预览态 → 完全实体
-      // 垂直锚点位移(px)：p=0 时把平躺图大幅下推到屏幕最底端（只露顶部一点点，
-      // 对应“有电脑就能播”时图在屏幕底端）；终态上移到视口中部，
-      // 使立正后整张图完整可见、顶边紧接上方「第一步」标题、底部留边距。
-      var SHIFT_START = 130, SHIFT_END = -55;
+      // 倾角：p=0 用 22° 透视的“梯形预览态”（参考 Tabbit）：截图像从桌面
+      // 往后仰，顶边远、底边近 → 近大远小的真梯形，纵深感强、内容仍清晰可辨。
+      // 透视靠 .step-image 的 transform 内 perspective(1000px) 函数产生（见 CSS 注释），
+      // 随 p 增大倾角从起点转到 0°：梯形透视逐渐消失、屏幕“竖起来”完全正视。
+      var TILT_START = 22,   TILT_END = 0;      // 倾角：梯形透视预览 → 正视（需与 CSS --step-tilt 初值一致）
+      var LIFT_START = 0,    LIFT_END = 0;      // 图片由 top 定位 + 倾角/位移自然落位，无需额外 lift
+      var SCALE_START = 0.96, SCALE_END = 1;    // 缩放：预览略小 → 原大
+      var BLUR_START = 1.2,  BLUR_END = 0;      // 模糊(px)：预览极轻微模糊 → 立起清晰
+      var OPACITY_START = 0.92, OPACITY_END = 1; // 透明度：预览态已清晰可辨 → 完全实体
+      // 垂直锚点位移(px)：p=0 时把平躺预览图下推，使其只在视口底部「露出约一半」
+      //（作为“下面还有内容”的预告）；随 p 增大整张图上移、立正、变清晰，
+      // 终态(p=1)上移到视口中部完整显示，顶边紧接「第一步 选商品」、底部留边距。
+      // SHIFT_START=40 让梯形透视的屏幕从视口底部升起、只露出上半部分 → “只露一半”；
+      // 随 p 增大整张图持续上移、立正、变清晰；SHIFT_END=-220 让定格(p=1)时
+      // 整张截图（含第 1、2 条商品的完整圆角底边）都落在视口内并完整显示；相较此前
+      // 的 -120 再上移 100px——与新标题同步上移 100px，保持“标题+内容”整体上提的版式。
+      var SHIFT_START = 40,  SHIFT_END = -220;
+
+      // 叙事驱动距离(px)：打字机打完后，用户继续下滑这么多像素，p 从 0 线性走到 1。
+      // 即“标题完整+半截图预览”到“旧标题逐字消失/新标题出现/图片立正完整”所需的滚动量。
+      // 调大 → 整个过渡更从容、逐字消失更慢；调小 → 更紧凑跟手。
+      // 注意：.s3-pin-zone 必须足够高，保证 base 之后仍有 ≥ DRIVE_DISTANCE 的可滚行程，
+      // 且 sticky stage 在此期间持续钉住（否则会提前触底或脱钉）。
+      var DRIVE_DISTANCE = 850;
 
       // 单一进度源 = “打字机标题完整打完之后，用户继续下滑的距离”。
       // 这样四步严格按先后发生：①滑入看到标题（同时底部已露出平躺模糊图）
@@ -1529,10 +1770,16 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
       // 关键：所有动画收在前 ~70%，p>0.72 进入“已完成定格”停留区。
       // 这样即便 p 接近 1 时 sticky stage 开始释放（标题/图随 zone 上移），
       // 动画早已到达终态并稳定显示，用户在到底前就完整看到立正清晰的图。
-      var HEAD_OUT_FROM = 0.08, HEAD_OUT_TO = 0.26;  // 旧标题淡出区间（前段快、利落）
-      var HEAD_IN_FROM  = 0.20, HEAD_IN_TO  = 0.40;  // 新标题淡入区间（紧接、略重叠）
-      // 图片立起：从很早（标题还在替换时）就开始立，到 p≈0.7 完成定格。
-      var IMG_FROM  = 0.04, IMG_TO  = 0.70;          // 图片立起占用的进度区间（收在前 70%）
+      // 节奏（优化后）：四步更分明、不挤在一起。
+      //   ① 旧标题「逐字逆序消失」：[0.06, 0.34] —— 区间拉长，给 14 个字足够的
+      //      逐字退场空间，从最后一字往前一个个隐去，像“出现动画倒着放”。
+      //   ② 新标题「第一步 选商品」淡入：[0.36, 0.56] —— 等旧标题基本退完才进场，
+      //      严格错峰、不鬼影重叠；与①留一点点呼吸间隙(0.34→0.36)。
+      //   ③ 图片立正变清晰：[0.06, 0.82] —— 贯穿全程、匀速铺展，到 p≈0.82 定格。
+      // 标题切换阈值：p 一旦越过该点就「直接整体切换」——旧标题瞬间全隐、
+      // 新标题瞬间全显，不随滚动距离逐字/渐变。取 0.2 让用户稍一下滑即完成切换。
+      var HEAD_SWITCH_AT = 0.2;
+      var IMG_FROM  = 0.06, IMG_TO  = 0.82;          // 图片立起占用的进度区间（贯穿全程、匀速）
 
       var reduceMotion = window.matchMedia &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1550,6 +1797,130 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
       function easeImg(t) { return 1 - (1 - t) * (1 - t) * 0.6 - (1 - t) * 0.4; }
       function lerp(a, b, t) { return a + (b - a) * t; }
 
+      /* ---------- 标题「序贯逐字切换 + 光标跟随」状态机 ---------- */
+      // 全站统一的出现/消失引擎 createMlbReveal 已提供 playReveal / playHide。
+      // 这里为第三屏的「新标题」单独建一个控制器（拆字、隐藏就位），旧标题沿用
+      // 页面早先创建的 window.screen3Reveal。两者通过状态机串成连贯切换：
+      //   old  → 旧标题完整显示、新标题隐藏
+      //   new  → 新标题完整显示、旧标题隐藏
+      //   切换：old→new = 旧标题 playHide（光标回退）完成后，新标题 playReveal（光标前进）
+      //         new→old = 新标题 playHide 完成后，旧标题 playReveal
+      // 用 s3TitleState 记录“稳定态”，s3TitlePending 记录“目标态”，避免每帧重入。
+      var newSub = document.querySelector('.step-heading-sub');
+
+      // 新标题逐字控制器：num（黑）+ name（渐变）两段，共享 step-heading-cursor。
+      var newHeadReveal = null;
+      (function buildNewHeadReveal() {
+        var num = document.querySelector('.step-heading-num');
+        var name = document.querySelector('.step-heading-name');
+        var cur = document.querySelector('.step-heading-cursor');
+        if (!num || !name || !window.createMlbReveal) return;
+        newHeadReveal = window.createMlbReveal({
+          segments: [
+            { el: num, cursor: cur },
+            { el: name, cursor: cur }
+          ]
+        });
+        newHeadReveal.ensureBuilt();   // 拆字就位，全部隐藏，等待 playReveal
+        newHeadReveal.hideAllInstant();
+      })();
+      window.stepHeadingReveal = newHeadReveal;
+
+      var s3TitleState = 'old';      // 当前稳定态：'old' | 'new'
+      var s3TitlePending = null;     // 正在过渡的目标态（过渡中），null=空闲
+      var s3TitleApplied = false;    // 是否已把稳定态「真正落地」到 DOM（首帧强制落地一次）
+
+      // 把某个稳定态「瞬时落地」到 DOM（无逐字动画）。用于首帧建立确定的初始态，
+      // 以及调试跳转后纠正残留态，保证 s3TitleState 与 DOM 始终一致。
+      function applyTitleStateInstant(state) {
+        if (state === 'new') {
+          if (window.screen3Reveal && window.screen3Reveal.hideAllInstant) window.screen3Reveal.hideAllInstant();
+          if (oldSub) oldSub.classList.remove('s3-sub-show');
+          if (heading) heading.classList.add('step-heading-ready');
+          if (newHeadReveal && newHeadReveal.showAllInstant) newHeadReveal.showAllInstant();
+          if (newSub) newSub.classList.add('step-heading-sub-show');
+        } else {
+          if (newHeadReveal && newHeadReveal.hideAllInstant) newHeadReveal.hideAllInstant();
+          if (newSub) newSub.classList.remove('step-heading-sub-show');
+          // 旧标题：仅当“不是由打字机正常打出”的场景（如调试跳转、已绕过门控）才瞬时全显，
+          // 否则不要碰旧标题——交给打字机 init() 逐字播放，保留首屏打字机效果。
+          var oldChars = window.__s3TitleChars;
+          var oldAlreadyShown = oldChars && oldChars.length &&
+            oldChars[oldChars.length - 1].classList.contains('mlb-visible');
+          if (!oldAlreadyShown && window.screen3Reveal && window.screen3Reveal.showAllInstant) {
+            window.screen3Reveal.showAllInstant();
+            if (oldSub) oldSub.classList.add('s3-sub-show');
+          }
+        }
+        s3TitleState = state;
+        s3TitlePending = null;
+        s3TitleApplied = true;
+      }
+
+      // 由 update 每帧调用：wantNew=true 表示应处于新标题态，false 表示旧标题态。
+      function requestTitlePhase(wantNew) {
+        var target = wantNew ? 'new' : 'old';
+        // 首帧：还没把任何态真正落地到 DOM 时，直接瞬时落地目标态（不播放逐字），
+        // 避免“标志位说是 old、但 DOM 残留 new”导致的不一致（含调试跳转场景）。
+        if (!s3TitleApplied) { applyTitleStateInstant(target); return; }
+        if (target === s3TitleState && s3TitlePending === null) return; // 已到位且空闲
+        if (s3TitlePending !== null) {
+          // 过渡进行中：若目标变化则记下，待当前段落完成后由 onDone 再校正
+          s3TitlePending = target;
+          return;
+        }
+        if (target === s3TitleState) return;
+        startTitleTransition(target);
+      }
+
+      function startTitleTransition(target) {
+        s3TitlePending = target;
+        if (target === 'new') {
+          // old → new：旧标题逐字退场（光标回退）→ 新标题逐字打出（光标前进）
+          if (oldSub) oldSub.classList.remove('s3-sub-show'); // 旧副标题淡出
+          var hideOld = function (done) {
+            if (window.screen3Reveal && window.screen3Reveal.playHide) window.screen3Reveal.playHide(done);
+            else done();
+          };
+          hideOld(function () {
+            if (heading) heading.classList.add('step-heading-ready');
+            var revealNew = function (done) {
+              if (newHeadReveal && newHeadReveal.playReveal) newHeadReveal.playReveal(done);
+              else done();
+            };
+            revealNew(function () {
+              if (newSub) newSub.classList.add('step-heading-sub-show'); // 新副标题随后淡入
+              finishTitleTransition('new');
+            });
+          });
+        } else {
+          // new → old：新标题逐字退场 → 旧标题逐字打回
+          if (newSub) newSub.classList.remove('step-heading-sub-show');
+          var hideNew = function (done) {
+            if (newHeadReveal && newHeadReveal.playHide) newHeadReveal.playHide(done);
+            else done();
+          };
+          hideNew(function () {
+            var revealOld = function (done) {
+              if (window.screen3Reveal && window.screen3Reveal.playReveal) window.screen3Reveal.playReveal(done);
+              else done();
+            };
+            revealOld(function () {
+              if (oldSub) oldSub.classList.add('s3-sub-show');
+              finishTitleTransition('old');
+            });
+          });
+        }
+      }
+
+      // 一段过渡完成后：落定稳定态；若期间目标又变了，则继续追赶。
+      function finishTitleTransition(reached) {
+        s3TitleState = reached;
+        var nextTarget = s3TitlePending;
+        s3TitlePending = null;
+        if (nextTarget && nextTarget !== reached) startTitleTransition(nextTarget);
+      }
+
       var lastP = -1;
       function update() {
         // 打字机标题尚未打完前，进度恒为 0：图片维持平躺模糊预览态、新标题不出现。
@@ -1561,22 +1932,34 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
         // pin-stage 是 sticky(top:0,height:100vh)，被钉在视口期间 zone 顶部
         // 从 0 一路滚到 -(zone.offsetHeight - vh)，归一化即整段 0→1。
         // 打字机未打完前进度恒为 0，二者不打架（图片维持平躺预览态）。
+        // 进度基准 = “打字机标题打完那一刻的滚动位置”(__s3DriveBaseY)。
+        // 打完后 p 从 0 开始：此刻标题完整、底部露出半截预览截图（稳定展示窗口）；
+        // 用户再继续下滑 DRIVE_DISTANCE 像素，p 线性涨到 1：旧标题逐字逆序消失、
+        // 新标题「第一步 选商品」接替、底部截图同步上移并立正变清晰、完整显示。
+        // 这样“先看到标题+半截图预览 → 滑动才上移完整呈现”的节奏由滚动距离精确驱动，
+        // 不再受打字机耗时/卡片联动触发点的影响。sticky stage 在整个 DRIVE 期间钉住，
+        // 故 .s3-pin-zone 需足够高以容纳 base 之后 ≥ DRIVE_DISTANCE 的可滚行程。
+        // ── 进度 p：用 pin-zone 的“钉住几何”驱动，而非动态记录的 scrollY ──
+        // 关键修复：原来以“打字机打完那一刻的 scrollY”做 base，但打字机是时间驱动、
+        // 在卡片离场后才 start 并播 2~3s，期间页面持续滚动，导致 base 落在 stage
+        // 已脱钉(rectTop 很负)的位置 → base 之后没有可滚行程，p 永远卡在 0。
+        // 改为：stage 钉住后 zone.rect.top 从 0 线性变负，-rectTop 即“已钉住滚过的像素”。
+        // p = (-rectTop) / DRIVE_DISTANCE，钳在 [0,1]。stage 未钉住(rectTop>0)时 p=0；
+        // 打字机门控仍生效：__s3TypeDone 为 false 时 p 恒 0（图片维持半立预览态）。
         var p = 0;
         if (window.__s3TypeDone) {
-          var vh = window.innerHeight;
-          var travel = zone.offsetHeight - vh;
-          var zTop = zone.getBoundingClientRect().top;
-          p = travel > 0 ? clamp((-zTop) / travel, 0, 1) : 0;
+          var rectTop = zone.getBoundingClientRect().top; // 钉住后 ≤ 0，与 scrollY 同坐标系（已含 zoom）
+          p = clamp((-rectTop) / DRIVE_DISTANCE, 0, 1);
         }
         if (p === lastP) return;
         lastP = p;
 
-        /* ---------- 阶段A：标题原位替换（错峰，杜绝鬼影重叠） ---------- */
-        // 旧标题先淡出，新标题之后才淡入，中段几乎不同时可见。
-        var outP = ease(sub(p, HEAD_OUT_FROM, HEAD_OUT_TO)); // 旧标题淡出进度 0→1
-        var inP  = ease(sub(p, HEAD_IN_FROM, HEAD_IN_TO));   // 新标题淡入进度 0→1
-        screen3.style.setProperty('--s3-fade', (1 - outP).toFixed(3));        // 原标题淡出上移
-        if (heading) heading.style.setProperty('--step-head', inP.toFixed(3)); // 新标题淡入上浮
+        /* ---------- 阶段A：标题「序贯逐字切换 + 光标跟随」 ---------- */
+        // 与全站统一：旧标题逐字逆序退场（光标回退）→ 新标题在同位置逐字打出
+        //（光标前进）。由 p 越过 HEAD_SWITCH_AT 触发一次完整序列；回落到阈值
+        // 以下则反向播放（新标题退场→旧标题打回）。用状态机避免每帧抖动重入。
+        var wantNew = p >= HEAD_SWITCH_AT;   // true=应显示新标题，false=应显示旧标题
+        requestTitlePhase(wantNew);
 
         /* ---------- 阶段B：图片立起、变清晰、变实体 ---------- */
         // 图片立起用近线性缓动 easeImg，让变化均匀铺满整个 IMG_FROM~IMG_TO
@@ -1591,15 +1974,20 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
       }
 
       if (reduceMotion) {
-        // 关闭动效：图片直接正视、清晰、实体；标题直接显示终态
+        // 关闭动效：图片直接正视、清晰、实体；标题直接显示终态（瞬时，无逐字/光标）
         if (row) row.style.setProperty('--step-shift', SHIFT_END + 'px');
         img.style.setProperty('--step-tilt', TILT_END + 'deg');
         img.style.setProperty('--step-lift', LIFT_END + 'px');
         img.style.setProperty('--step-scale', SCALE_END);
         img.style.setProperty('--step-blur', BLUR_END + 'px');
         img.style.setProperty('--step-opacity', OPACITY_END);
-        screen3.style.setProperty('--s3-fade', '0');
-        if (heading) heading.style.setProperty('--step-head', '1');
+        // 旧标题瞬时全隐、新标题瞬时全显（不播放逐字、不显示光标）
+        if (window.screen3Reveal && window.screen3Reveal.hideAllInstant) window.screen3Reveal.hideAllInstant();
+        if (oldSub) oldSub.style.opacity = '0';
+        if (heading) heading.classList.add('step-heading-ready');
+        if (newHeadReveal && newHeadReveal.showAllInstant) newHeadReveal.showAllInstant();
+        if (newSub) newSub.classList.add('step-heading-sub-show');
+        s3TitleState = 'new';
         return;
       }
 
@@ -1607,31 +1995,31 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
       // 原因：某些环境（含程序化 scrollTo、惯性滚动、触控板）下 scroll 事件
       // 不一定可靠触发，会导致标题替换/图片立起“卡住不动”。rAF 轮询每帧检测
       // 滚动位置变化，只在变化时重算，既稳健跟手又不浪费性能。
-      var lastY = -1;
+      // 驱动：每帧无条件调用 update()，由 update() 内部用 `p === lastP` 自行决定
+      // 是否写 DOM。不再以 `window.scrollY !== lastY` 作为门控——因为第三屏是
+      // sticky 钉住，且存在程序化 scrollTo / 惯性滚动 / 上下回滚等场景，用 scrollY
+      // 变化做门控会出现“某帧 p 未变即 return、随后 scrollY===lastY 永久不再重算”
+      // 的竞态，表现为「向上回滚时图片/标题卡住不动」。改为每帧重算实时几何，
+      // 开销仅一次 getBoundingClientRect，可彻底消除回滚卡顿。
       function tick() {
         // __s3Freeze：验证态冻结开关，置真时 tick 不再用真实滚动覆盖手动跳转的状态
-        if (!window.__s3Freeze && window.scrollY !== lastY) {
-          lastY = window.scrollY;
-          update();
-        }
+        if (!window.__s3Freeze) update();
         window.requestAnimationFrame(tick);
       }
-      // resize 时窗口高度变化会改变进度映射，强制重算一次。
+      // resize 时窗口高度变化会改变进度映射，强制重算一次（清掉缓存的 lastP）。
       window.addEventListener('resize', function () {
-        lastY = -1; // 触发下一帧重算
+        lastP = -1; // 触发下一帧重算
+        if (!window.__s3Freeze) update();
       }, { passive: true });
       // 打字机完成开闸时立即同步一次，确立 p=0 基准、衔接后续滚动驱动。
       window.addEventListener('s3-type-done', function () {
-        lastY = -1;
+        lastP = -1;
         update();
       });
-      // 双保险：scroll 事件兜底。窗口失焦/后台标签时 rAF 可能被节流暂停，
-      // 仅靠 tick 轮询会“卡住不动”；scroll 事件不依赖 rAF，可兜底驱动叙事。
+      // 双保险：scroll 事件也驱动一次（窗口失焦/后台标签时 rAF 可能被节流暂停，
+      // scroll 不依赖 rAF，可兜底）。同样不做 scrollY 门控，交给 update 内部判重。
       window.addEventListener('scroll', function () {
-        if (!window.__s3Freeze && window.scrollY !== lastY) {
-          lastY = window.scrollY;
-          update();
-        }
+        if (!window.__s3Freeze) update();
       }, { passive: true });
       update();              // 初始化一次
       window.requestAnimationFrame(tick); // 启动持续轮询
@@ -1645,11 +2033,11 @@ transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
         var zoneTop = zone.getBoundingClientRect().top + window.scrollY;
         window.__s3TypeDone = true; // 跳过打字机门控，直接驱动
         window.scrollTo(0, Math.round(zoneTop + clamp(target, 0, 1) * travel));
-        lastY = window.scrollY; update();
+        lastP = -1; update();
         window.__s3Freeze = true;  // 冻结：防止窗口尺寸抖动时 tick 用漂移的真实位置覆盖
         return { travel: travel, zoneTop: zoneTop, scrollY: window.scrollY, p: window.__s3P() };
       };
-      window.__s3Unfreeze = function () { window.__s3Freeze = false; lastY = -1; };
+      window.__s3Unfreeze = function () { window.__s3Freeze = false; lastP = -1; };
       window.__s3P = function () {
         var vh = window.innerHeight;
         var travel = zone.offsetHeight - vh;

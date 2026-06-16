@@ -175,10 +175,13 @@
       width: 100%;
     }
 
-    /* 滚动动画预留空间 */
+    /* 滚动动画预留空间：为光晕放大上移 + 卡片视差离场提供行程。
+       高度即「卡片之后到第三屏标题之间的空滚行程」。从 2000px 缩到 1000px，
+       使卡片离场后紧接着进入第三屏吸附区——配合脚本里「卡片滑出视口即触发标题」，
+       实现「卡片走 → 标题来」的无缝衔接，不再留出近 900px 的大段空白。 */
     .scroll-zone {
       position: relative;
-      height: 3000px;
+      height: 1000px;
       background: transparent;
     }
 
@@ -449,9 +452,45 @@ background-size: 200% 100%;
     /* =============================================
        第三屏：打字机主标题屏（叠在 scroll-zone 内的光晕背景上）
     ============================================= */
-    .screen3 {
-      position: absolute;
-      top: 1100px;
+    /* =============================================
+       第三屏叙事：sticky 吸附区（参考 Tabbit 首屏）
+       pin-zone 提供滚动行程；pin-stage 钉满视口，内部标题/图片做立起动画。
+    ============================================= */
+    .s3-pin-zone {
+      position: relative;
+      /* 总高 = 1 个视口(sticky 占位) + 钉住行程。钉住行程 = zoneH - 100vh，
+         这段行程被 update() 用作整段叙事进度 p（p = -zone.rect.top / DRIVE_DISTANCE）。
+         段1（图片立正）使用滚动驱动，段2/3 由 wheel 事件触发切换无需额外行程。
+         200vh：前 100vh 是 sticky 占位，剩余 100vh 行程（段1约占 13vh
+         即可触发锁定，三步完成后直接跳 zone 底部紧接下一屏）。 */
+      height: 200vh;
+      background: transparent;
+      z-index: 2;
+    }
+    /* 终点缓冲：pin-zone 之后的少量滚动空间，叙事滚到 p=1 后略留缓冲再过场到下一屏。
+       注意：真正容纳 DRIVE 行程的是 pin-zone 自身高度（sticky stage 全程钉在 pin-zone 内）；
+       spacer 在 pin-zone 之后，stage 已 unpin，不能用来承载立正动画，故保持小高度即可。 */
+    .s3-end-spacer {
+      position: relative;
+      height: 0;
+      background: transparent;
+    }
+    .s3-pin-stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: hidden;
+      /* 3D 透视（参考 Tabbit，强化梯形感）：拉近 perspective 让近大远小更夸张，
+         perspective-origin 上提到 30%（视点偏上、俶视）让梯形更明显；
+         配合 .step-image 的 transform-origin:center bottom + rotateX 产生“立在桌面”的梯形透视。 */
+      perspective: 750px;
+      perspective-origin: center 30%;
+    }
+
+.screen3 {
+position: absolute;
+/* 标题+副标题视觉居中（黄金分割偏上，兼顾截图3/4可见） */
+top: 28vh;
       left: 50%;
       transform: translateX(-50%);
       width: 100%;
@@ -459,7 +498,19 @@ background-size: 200% 100%;
       padding: 0 40px;
       box-sizing: border-box;
       text-align: center;
-      z-index: 2;
+      z-index: 3;
+      /* 滚到顶时整体淡出上移，由 JS 写入 --s3-fade（1→0）；接替给步骤新标题。
+         注意：滚动驱动的进度本身已逐帧平滑，绝不能再加 CSS transition——
+         否则快速下滑时变量已瞬间到 0、视觉却因 0.4s 过渡仍亮着，
+         与正在淡入的新标题同屏可见 → 鬼影重叠。这里必须无 transition、严格跟手。 */
+      --s3-fade: 1;
+      /* --s3-rise：旧标题随滚动向上滑动的位移(px，负值向上)，由 JS 在
+         p∈[0, HEAD_SWITCH_AT] 内从 0 线性写到 -100，使旧标题“滑到”新标题
+         所在高度(22vh-8px-100px)；到达阈值时旧标题消失、新标题在同一位置
+         原位出现，视觉连贯不跳位。 */
+      --s3-rise: 0px;
+      opacity: var(--s3-fade);
+      transform: translateX(-50%) translateY(calc((1 - var(--s3-fade)) * -24px + var(--s3-rise)));
     }
 
     .screen3-title {
@@ -498,6 +549,17 @@ background-size: 200% 100%;
     }
 
     /* =============================================
+       三步区布局可调参数
+       —— 修改以下变量即可调整三步态的间距和图片显示
+    ============================================= */
+    :root {
+      --step-heading-top: 121px;         /* 三步标题距 pin-stage 顶部距离 */
+      --step-title-sub-gap: 15px;        /* 标题 → 副标题 间距 */
+      --step-sub-img-gap: 67px;          /* 副标题 → 图片 间距 */
+      --step-img-max-height: calc(100vh - 440px); /* 图片最大高度（防裁切） */
+    }
+
+    /* =============================================
        逐字揭示（模糊淡入）—— 统一标题出现效果
        参数集中在 :root，JS 配置见 MLB_REVEAL_CONFIG
     ============================================= */
@@ -528,13 +590,22 @@ background-size: 200% 100%;
       filter: blur(0);
     }
 
+    /* 标题「直接切换」时禁用逐字过渡：旧标题被硬隐藏/硬显示时不走 transition，
+       从而瞬间整体显隐，而不是随 CSS transition 渐隐（与“不随滚动渐变”一致）。 */
+    .screen3-title.s3-instant .mlb-char {
+      transition: none;
+    }
+
     /* 渐变标题段内拆出的字：所有字共用「整句宽度」的同一条渐变坐标系，
        每个字按自身在整句中的水平偏移（--mlb-grad-x）裁剪对应片段，
        拼起来是一条连续渐变（而不是每字各走一遍）。
        --mlb-grad-w 为整句像素宽度，由 JS 在拆字后写入。
        流动动画 mlbGradFlow 在每字偏移基础上整体平移，保持整句一起流动。 */
     .hero-title-2 .mlb-char,
-    .screen3-title .s3-grad .mlb-char {
+    .screen3-title .s3-grad .mlb-char,
+    .step-heading-name .mlb-char,
+    .step-card-name .mlb-char,
+    .screen4-title-right .mlb-char {
       --mlb-grad-x: 0px;
       --mlb-grad-w: 100%;
       color: transparent;
@@ -575,23 +646,127 @@ background-size: 200% 100%;
        步骤流程模块（左文右图）—— 叠在 scroll-zone 内，screen3 下方
     ============================================= */
     .steps-section {
+      /* 填满 sticky stage，作为标题与图片的定位容器（透视由 .s3-pin-stage 提供） */
       position: absolute;
-      top: 1280px;
-      left: 50%;
-      transform: translateX(-50%);
+      inset: 0;
       width: 100%;
-      max-width: 1200px;
-      padding: 0 40px;
-      box-sizing: border-box;
       z-index: 2;
     }
 
-    .step-row {
+    /* 步骤新标题：绝对定位钉在 steps-section 顶部，与 screen3 标题同一视觉高度，
+       随滚动淡入「原位接替」原第三屏标题。 */
+    .step-heading {
+      position: absolute;
+      /* 新标题位置：由 --step-heading-top 控制 */
+      top: var(--step-heading-top, 20px);
+      left: 50%;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      gap: 64px;
+      justify-content: flex-start;
+      white-space: nowrap;
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      z-index: 4;
+      /* 容器始终存在（透明背景）；显隐由内部 .mlb-char 逐字控制，
+         初始整体不可见 → 由 JS 在序列里逐字打出。 */
+      transform: translateX(-50%);
+      /* 默认隐藏整块，避免拆字前的空容器闪现；加 .step-heading-ready 后显示。 */
+      opacity: 0;
     }
+
+    .step-heading.step-heading-ready {
+      opacity: 1;
+    }
+
+    /* 未就位（未加 .step-heading-ready）时强制隐藏新标题光标：
+       光标是常驻闪烁的 <img>，不属于 .mlb-char，hideAllInstant 管不到它；
+       若仅靠容器 opacity:0 隐藏，在旧标题态下这个独立光标仍会“漏出”一个
+       飘着的竖条。这里用 display:none 从根上锁死——只有新标题真正就位
+       (.step-heading-ready) 时光标才显示。 */
+    .step-heading:not(.step-heading-ready) .step-heading-cursor {
+      display: none;
+    }
+
+    /* 新标题光标：与第三屏旧标题光标同尺寸、同闪烁，随逐字进度前进/回退。 */
+    .step-heading-cursor {
+      display: inline-block;
+      height: 78px;
+      width: auto;
+      margin-left: 6px;
+      object-fit: contain;
+      vertical-align: middle;
+      flex-shrink: 0;
+      animation: cursorBlink 0.5s ease-in-out infinite;
+    }
+
+    /* “第一步”：与“选商品”同字号（标题体），黑色。 */
+    .step-heading-num {
+      font-size: 48px;
+      font-weight: 600;
+      color: #0c0024;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+    }
+
+    /* 标题行：两段横排、基线对齐、字间距 18px。 */
+    .step-heading-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 18px;
+    }
+
+    /* “选商品”：与“第一步”同字号，蓝紫色流动渐变（复用 titleGradientFlow）。 */
+    .step-heading-name {
+      font-size: 48px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      background: linear-gradient(120deg, #4B1EFF, #6B3DFF, #9B6BFF, #6B3DFF, #4B1EFF);
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      animation: titleGradientFlow 4s linear infinite;
+    }
+
+    /* 新标题的副标题：风格与旧副标题 .screen3-sub 一致，跟随新标题一起淡入。
+       默认隐藏（opacity:0），只有加上 .step-heading-sub-show 才淡入显示——
+       否则它会从页面加载起就一直显示，与旧标题/旧副标题叠在一起形成“鬼影重叠”。 */
+    .step-heading-sub {
+      margin-top: var(--step-title-sub-gap, 50px);
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 18px;
+      font-weight: 400;
+      color: #6b6480;
+      letter-spacing: 0.02em;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    .step-heading-sub.step-heading-sub-show {
+      opacity: 1;
+    }
+
+.step-row {
+/* 图片钉在视口中下部：立正后大致居中偏下，留出上方标题空间。
+   --step-shift 由 JS 随进度写入：p=0 时大幅下移，使平躺图沉到屏幕最底端、
+   只露出顶部一点点（“有电脑就能播”时图在屏幕底端）；p=1 归 0，图升到中部居中。 */
+--step-shift: 0px;
+position: absolute;
+top: 40vh;
+left: 50%;
+transform: translate(-50%, var(--step-shift));
+width: 100%;
+max-width: 1400px;
+padding: 0 40px;
+box-sizing: border-box;
+display: flex;
+align-items: flex-start;
+justify-content: center;
+gap: 64px;
+transition: none; /* 段1滚动驱动时需要即时跟手，不加transition；步骤切换动画由JS控制 */
+}
 
     /* 左侧文字 */
     .step-text {
@@ -638,17 +813,162 @@ background-size: 200% 100%;
       margin: 0;
     }
 
-    /* 图片（放大约 2 倍，居中显示） */
-    .step-image {
-      flex: 0 0 auto;
-      width: 980px;
-      max-width: 100%;
+/* 图片（放大约 2 倍，居中显示）—— 当前为原 980px 的 1.2 倍 */
+.step-image {
+position: relative;  /* 为退出图片的绝对定位提供定位上下文 */
+overflow: hidden;    /* 图片滑入/滑出时不超出容器 */
+      flex: 0 1 auto;
+      width: 100%;
+      max-width: 1360px;   /* 容器够宽时最大 1360px */
+      /* aspect-ratio removed: 图片自然高度，向下延伸 */
+      /* 3D 透视：以底边为轴向后翻倒，随滚动“立起来”。
+         变量由 JS 写入，平躺(大角度/下沉/缩小/模糊/半透明)→立起(0/原位/原大/清晰/不透明)。 */
+      --step-tilt: 22deg;        /* 倾角：梯形透视预览（须与 JS TILT_START 一致） */
+      --step-lift: 0px;          /* 下沉位移：图片由 top 定位 + 倾角自然落位，lift 起点 0（--step-shift 在 .step-row 上） */
+      --step-scale: 0.96;        /* 预览时略缩小，立起回 1 */
+      --step-blur: 1.2px;        /* 预览时极轻微模糊，立起渐变清晰 */
+      --step-opacity: 0.92;      /* 预览态已清晰可辨，立起渐变不透明 */
+      /* 绕底边翻倒：平躺时图片顶部向屏幕深处倒下去、底边贴近视点，
+         顶边远、底边近 → 近大远小的真梯形透视（屏幕躺在桌面上的观感）。
+         关键：用 transform 里前置的 perspective() 函数提供透视，
+         而不靠祖先 .s3-pin-stage 的 perspective——因为中间的 .step-row 用了
+         translate 且未开 preserve-3d，会把 3D 上下文压平、使 rotateX 退化为“竖向压扁”。
+         在本元素 transform 内用 perspective() 函数可绕过该问题，必定产生梯形。
+         立起时倾角回 0 自然正视。 */
+      transform-origin: center bottom;
+      transform:
+        perspective(1000px)
+        translateY(var(--step-lift))
+        rotateX(var(--step-tilt))
+        scale(var(--step-scale));
+      opacity: var(--step-opacity);
+      filter: blur(var(--step-blur));
+      will-change: transform, opacity, filter;
+      /* 滚动驱动：不加 transition，由 JS 逐帧写入值实现平滑立起 */
     }
 
     .step-image img {
       display: block;
       width: 100%;
       height: auto;
+      /* 限制图片最大高度：由 --step-img-max-height 控制 */
+      max-height: var(--step-img-max-height, calc(100vh - 240px));
+      object-fit: contain;
+      border-radius: 16px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
+      /* 图片切换：淡入淡出 + 轻微缩放 */
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+
+/* 图片切换动画：旧图向右滑出，新图从右向左滑入 */
+.step-image img.step-img-exit {
+opacity: 0;
+transform: translateX(60px);
+position: absolute;
+inset: 0;
+}
+.step-image img.step-img-enter {
+opacity: 0;
+transform: translateX(60px);
+}
+.step-image img.step-img-active {
+opacity: 1;
+transform: translateX(0);
+}
+
+    /* =============================================
+       三步展开区：第二步、第三步纵向排列（正常文档流）
+    ============================================= */
+    .steps-expand {
+      position: relative;
+      z-index: 2;
+      padding: 120px 0 80px;
+    }
+
+    .step-card {
+      max-width: 1200px;
+      margin: 0 auto 200px;
+      padding: 0 40px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .step-card:last-child {
+      margin-bottom: 0;
+    }
+
+    .step-card-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    .step-card-num {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 48px;
+      font-weight: 600;
+      color: #0c0024;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+    }
+
+    .step-card-name {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 48px;
+      font-weight: 600;
+      background: linear-gradient(90deg, #6c3cff 0%, #a855f7 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+    }
+
+    .step-card-sub {
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 18px;
+      font-weight: 400;
+      color: #6b6480;
+      letter-spacing: 0.02em;
+      margin: 0 0 40px;
+    }
+
+    .step-card-img {
+      width: 100%;
+      max-width: 1176px;
+      margin: 0 auto;
+    }
+
+    .step-card-img img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 16px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
+    }
+
+    /* 步骤卡片光标：与第三屏光标同尺寸同闪烁 */
+    .step-card-cursor {
+      display: inline-block;
+      height: 60px;
+      width: auto;
+      margin-left: 6px;
+      object-fit: contain;
+      vertical-align: middle;
+      flex-shrink: 0;
+      animation: cursorBlink 0.5s ease-in-out infinite;
+    }
+
+    /* 步骤卡片：图片初始隐藏，打字完成后淡入 */
+    .step-card[data-step-card] .step-card-img {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .step-card[data-step-card].step-card-revealed .step-card-img {
+      opacity: 1;
+      transform: translateY(0);
     }
 
     /* ====== 右侧图片 ====== */
@@ -756,7 +1076,194 @@ background-size: 200% 100%;
         gap: 24px;
       }
     }
+
+    /* =============================================
+       第四屏：数字人形象介绍
+    ============================================= */
+    .screen4 {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 80px 40px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    .screen4-inner {
+      position: relative;
+      width: 100%;
+      max-width: 1400px;
+      height: 700px;
+    }
+
+    /* 3D 模型居中，覆盖在文字上方 */
+    .screen4-model-wrap {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 42%;
+      max-width: 500px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .screen4-model-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      pointer-events: auto;
+    }
+
+    /* 标题行：左右两侧分布，文字在模型下层 */
+    .screen4-title-row {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      transform: translateY(-50%);
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+    }
+
+    .screen4-title-left,
+    .screen4-title-right {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 52px;
+      font-weight: bold;
+      line-height: 1.4;
+      letter-spacing: -0.01em;
+    }
+
+    .screen4-title-left {
+      color: #0c0024;
+    }
+
+    .screen4-title-right {
+      display: flex;
+      align-items: center;
+    }
+
+    .screen4-title-right .mlb-char {
+      /* 渐变字符样式由全局 .mlb-char 渐变规则覆盖 */
+    }
+
+    .screen4-cursor {
+      display: inline-block;
+      height: 72px;
+      width: auto;
+      margin-left: 2px;
+      vertical-align: middle;
+    }
+
+    /* 副标题居中显示在底部 */
+    .screen4-sub-wrap {
+      position: absolute;
+      bottom: 60px;
+      left: 0;
+      right: 0;
+      z-index: 1;
+      text-align: center;
+    }
+
+    .screen4-sub {
+      font-family: "Hiragino Sans GB W3", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 18px;
+      line-height: 1.8;
+      color: #6b6480;
+      letter-spacing: 0.02em;
+      max-width: 540px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 1100px) {
+      .screen4-title-left,
+      .screen4-title-right { font-size: 40px; }
+      .screen4-inner { height: 550px; }
+    }
+
+    @media (max-width: 600px) {
+      .screen4-title-left,
+      .screen4-title-right { font-size: 28px; }
+      .screen4-inner { height: 450px; }
+      .screen4-sub { font-size: 15px; }
+    }
+
+    /* =============================================
+       图标网格流动区域（screen4 上方）—— 参考 Google Antigravity
+    ============================================= */
+    .icon-marquee {
+      position: relative;
+      padding: 40px 0;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    /* 左右渐隐遮罩 */
+    .icon-marquee::before,
+    .icon-marquee::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 160px;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .icon-marquee::before {
+      left: 0;
+      background: linear-gradient(to right, #ffffff, transparent);
+    }
+    .icon-marquee::after {
+      right: 0;
+      background: linear-gradient(to left, #ffffff, transparent);
+    }
+
+    .icon-list {
+      display: flex;
+      gap: 25px;
+      width: max-content;
+      will-change: transform;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .icon-item {
+      flex-shrink: 0;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: #fafafa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon-item img {
+      width: 32px;
+      height: 32px;
+      opacity: 1;
+    }
+
   </style>
+  <!-- Three.js for 3D white model background -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
 
@@ -855,23 +1362,119 @@ background-size: 200% 100%;
         </div>
       </div>
 
-      <!-- 第三屏：打字机主标题屏（叠在光晕背景上） -->
-      <div class="screen3">
-        <div class="screen3-title"><span class="s3-dark s3-type"></span><span class="s3-grad s3-type"></span><img src="assets/cursor.png" alt="" class="screen3-cursor"></div>
-        <div class="screen3-sub">不用懂直播，不用请人，3分钟搞定一个直播间</div>
-      </div>
+    </section>
 
-      <!-- 步骤 01：选商品（图片居中） -->
-      <div class="steps-section">
-        <div class="step-row">
-          <div class="step-image">
-            <img src="assets/step-1.png" alt="选商品后台界面">
+    <!-- 第三屏叙事（sticky 吸附，参考 Tabbit 首屏）：
+         pin-zone 提供滚动行程，pin-stage 钉满视口；滚动该区段时
+         标题与图片被钉在视口里做「标题原位替换 + 图片由底端平躺→立正变清晰」的动画，
+         图片立正后稳停视口中部不飞走。 -->
+    <section class="s3-pin-zone">
+      <div class="s3-pin-stage">
+        <!-- 第三屏打字机主标题（旧标题） -->
+        <div class="screen3">
+          <div class="screen3-title"><span class="s3-dark s3-type"></span><span class="s3-grad s3-type"></span><img src="assets/cursor.png" alt="" class="screen3-cursor"></div>
+          <div class="screen3-sub">不用懂直播，不用请人，3分钟搞定一个直播间</div>
+        </div>
+
+        <!-- 步骤 01：选商品 -->
+        <div class="steps-section">
+        <!-- 新标题：旧标题逐字退场后，在同位置「逐字打出 + 光标前进」接替（与全站统一）。
+             num/name 两段文字交给统一揭示库拆字，共享一个 step-heading-cursor 光标。 -->
+        <div class="step-heading">
+          <div class="step-heading-title">
+            <span class="step-heading-num" data-text="第一步"></span>
+            <span class="step-heading-name" data-text="选商品"></span><img src="assets/cursor.png" alt="" class="step-heading-cursor cursor-hidden">
+          </div>
+          <div class="step-heading-sub">选好直播间中所要售卖的商品，讲解词+卖点话术全自动生成</div>
+        </div>
+          <div class="step-row">
+            <div class="step-image">
+              <img src="assets/step-1.png?v=2" alt="选商品后台界面">
+            </div>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- 终点缓冲 -->
+    <section class="s3-end-spacer" aria-hidden="true"></section>
+
+    <!-- 第二步、第三步：纵向展开，正常文档流 -->
+    <section class="steps-expand">
+      <div class="step-card" data-step-card>
+        <div class="step-card-heading">
+          <span class="step-card-num" data-text="第二步"></span>
+          <span class="step-card-name" data-text="配装修"></span><img src="assets/cursor.png" alt="" class="step-card-cursor cursor-hidden">
+        </div>
+        <p class="step-card-sub" data-text="300+数字人形象库里选一个，直播间背景装修一步到位"></p>
+        <div class="step-card-img">
+          <img src="assets/step-2.png?v=2" alt="配装修界面">
+        </div>
+      </div>
+      <div class="step-card" data-step-card>
+        <div class="step-card-heading">
+          <span class="step-card-num" data-text="第三步"></span>
+          <span class="step-card-name" data-text="自动开播"></span><img src="assets/cursor.png" alt="" class="step-card-cursor cursor-hidden">
+        </div>
+        <p class="step-card-sub" data-text="合成完成后7×24全天候，关掉电脑也不停，边聊边卖不漏单"></p>
+        <div class="step-card-img">
+          <img src="assets/step-3.png?v=3" alt="自动开播界面">
+        </div>
+      </div>
+    </section>
+
+
+<!-- 图标网格流动区域 -->
+<section class="icon-marquee" aria-hidden="true">
+  <ul class="icon-list">
+    <li class="icon-item"><img src="assets/icons/icon.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/icon-2.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/icon-3.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/icon-4.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/video.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/square-stack-up-fill.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/贴纸.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/富文本编辑器_文本.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/组 630.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/组件 46.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/组件 98.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/蒙版组 23.svg" alt=""></li>
+    <!-- 克隆一份实现无缝循环 -->
+    <li class="icon-item"><img src="assets/icons/icon.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/icon-2.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/icon-3.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/icon-4.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/video.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/square-stack-up-fill.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/贴纸.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/富文本编辑器_文本.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/组 630.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/组件 46.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/组件 98.svg" alt=""></li>
+    <li class="icon-item"><img src="assets/icons/蒙版组 23.svg" alt=""></li>
+  </ul>
+</section>
+
+<!-- 第四屏：数字人形象介绍 — 模型居中，标题左右分布 -->
+<section class="screen4" id="screen4Section">
+<div class="screen4-inner">
+  <!-- 标题行：左右各一部分，z-index 在模型下方 -->
+  <div class="screen4-title-row">
+    <h2 class="screen4-title-left" data-text="你的直播间">你的直播间</h2>
+    <h2 class="screen4-title-right"><span data-text="不再依赖真人"></span><img src="assets/cursor.png" alt="" class="screen4-cursor cursor-hidden"></h2>
   </div>
+  <!-- 3D 模型覆盖在文字上方 -->
+  <div class="screen4-model-wrap">
+    <canvas class="screen4-model-canvas" id="modelCanvas"></canvas>
+  </div>
+  <!-- 副标题居中底部 -->
+  <div class="screen4-sub-wrap">
+    <p class="screen4-sub" data-text="行业专属数字人形象，支持真人 1:1 复刻与门店实景定制。3 分钟完成配置，7×24 小时稳定上播不请假"></p>
+  </div>
+</div>
+</section>
+
+</div>
 
   <script>
     (function () {
@@ -1027,7 +1630,7 @@ background-size: 200% 100%;
           chars.push(span);
         }
         // 判断本段是否为渐变文字段（需要整句连续渐变）
-        var isGrad = !!(el.closest && el.closest('.hero-title-2, .screen3-title .s3-grad'));
+        var isGrad = !!(el.closest && el.closest('.hero-title-2, .screen3-title .s3-grad, .step-heading-name, .step-card-name, .screen4-title-right'));
         return { el: el, cursor: seg.cursor || null, chars: chars, text: text, isGrad: isGrad };
       }
 
@@ -1123,7 +1726,150 @@ background-size: 200% 100%;
         segData = [];
       }
 
-      return { init: init, destroy: destroy };
+      /* ============================================================
+       * 扩展能力：把控制器变成「可正放/可倒放、光标双向跟随」的引擎
+       * ------------------------------------------------------------
+       * - ensureBuilt()  仅拆字就位（不自动播放），供“先静默就绪、后由
+       *   外部时机触发出现/消失”的标题使用（如第三屏新标题）。
+       * - getCursor()    返回该控制器使用的光标元素（多段共享时取第一个）。
+       * - getChars()     返回按显示顺序拼好的全部字符 span。
+       * - showAllInstant() / hideAllInstant()  瞬时全显/全隐（无逐字、无光标动画）。
+       * - playReveal(onDone) 正向逐字出现：光标从头前进，字一个个亮起。
+       * - playHide(onDone)   逆序逐字消失：从末尾往前，字一个个隐去，
+       *                      光标“跟着退”停在剩余最后一个字之后；退到头光标藏起。
+       * 说明：出现/消失共用 .mlb-char 的 CSS transition（模糊+上浮+淡入），
+       *       因此「消失」自然是「出现」的逆放，全站观感统一。
+       * ============================================================ */
+
+      // 确保已拆字就位（但全部隐藏、不播放）。返回是否本次新建。
+      function ensureBuilt() {
+        if (built) return false;
+        built = true;
+        segData = segments.map(buildSegment);
+        segData.forEach(applyGradientCoords);
+        segData.forEach(function (s) {
+          if (s.cursor) s.cursor.classList.add('cursor-hidden');
+        });
+        return true;
+      }
+
+      // 主光标：多段共享同一光标时取第一个非空的
+      function getCursor() {
+        for (var i = 0; i < segData.length; i++) {
+          if (segData[i].cursor) return segData[i].cursor;
+        }
+        return null;
+      }
+
+      // 按显示顺序拼接所有字符 span
+      function getChars() {
+        var all = [];
+        segData.forEach(function (s) {
+          for (var i = 0; i < s.chars.length; i++) all.push(s.chars[i]);
+        });
+        return all;
+      }
+
+      // 瞬时全显（无逐字动画）：用于“应处于完整态”的初始/兜底场景
+      function showAllInstant() {
+        ensureBuilt();
+        getChars().forEach(function (c) { c.classList.add('mlb-visible'); });
+        var cur = getCursor();
+        if (cur) cur.classList.add('cursor-hidden'); // 完整态默认不留光标
+      }
+
+      // 瞬时全隐（无逐字动画）
+      function hideAllInstant() {
+        ensureBuilt();
+        getChars().forEach(function (c) { c.classList.remove('mlb-visible'); });
+        var cur = getCursor();
+        if (cur) cur.classList.add('cursor-hidden');
+      }
+
+      // 正向逐字出现 + 光标前进。playing 防重入；完成回调 onDone。
+      // speedOverride: 可选，覆盖 charDelay（ms），用于步骤切换时加速。
+      var playing = false;
+      function playReveal(onDone, speedOverride) {
+        ensureBuilt();
+        clearTimers();
+        playing = true;
+        var delay = (typeof speedOverride === 'number') ? speedOverride : cfg.charDelay;
+        var chars = getChars();
+        var cur = getCursor();
+        // 起步：所有字隐藏，光标显示并落在第一个字之前
+        chars.forEach(function (c) { c.classList.remove('mlb-visible'); });
+        if (cur) {
+          cur.classList.remove('cursor-hidden');
+          if (chars[0] && chars[0].parentNode) {
+            chars[0].parentNode.insertBefore(cur, chars[0]);
+          }
+        }
+        chars.forEach(function (span, ci) {
+          timers.push(setTimeout(function () {
+            span.classList.add('mlb-visible');
+            moveCursorAfter(cur, span); // 光标跟到刚打出的字之后
+          }, ci * delay));
+        });
+        timers.push(setTimeout(function () {
+          playing = false;
+          if (cur) cur.classList.add('cursor-hidden'); // 打完收起光标
+          if (typeof onDone === 'function') onDone();
+        }, chars.length * delay + 40));
+      }
+
+      // 逆序逐字消失 + 光标回退。从末尾往前一个个隐去，
+      // 光标始终停在“剩余可见的最后一个字”之后；全部退完后光标藏起。
+      function playHide(onDone) {
+        ensureBuilt();
+        clearTimers();
+        playing = true;
+        var chars = getChars();
+        var cur = getCursor();
+        var N = chars.length;
+        // 消失节奏：相邻字间隔取出现间隔的一半，使「逐字消失」整体快 2 倍
+        // （出现 playReveal 仍用 cfg.charDelay，速度不变）。
+        var hideDelay = cfg.charDelay / 2;
+        if (cur) {
+          cur.classList.remove('cursor-hidden');
+          // 光标先停到最后一个字之后
+          if (chars[N - 1]) moveCursorAfter(cur, chars[N - 1]);
+        }
+        for (var k = 0; k < N; k++) {
+          var idx = N - 1 - k; // 从末尾往前
+          timers.push(setTimeout((function (i) {
+            return function () {
+              chars[i].classList.remove('mlb-visible'); // 该字隐去
+              // 光标回退到“仍可见的最后一个字”之后；若已退到头则放到首字之前
+              if (cur) {
+                if (i > 0) moveCursorAfter(cur, chars[i - 1]);
+                else if (chars[0] && chars[0].parentNode) {
+                  chars[0].parentNode.insertBefore(cur, chars[0]);
+                }
+              }
+            };
+          })(idx), k * hideDelay));
+        }
+        timers.push(setTimeout(function () {
+          playing = false;
+          if (cur) cur.classList.add('cursor-hidden'); // 退完收起光标
+          if (typeof onDone === 'function') onDone();
+        }, N * hideDelay + 40));
+      }
+
+      function isPlaying() { return playing; }
+
+      return {
+        init: init,
+        destroy: destroy,
+        ensureBuilt: ensureBuilt,
+        getCursor: getCursor,
+        getChars: getChars,
+        showAllInstant: showAllInstant,
+        hideAllInstant: hideAllInstant,
+        playReveal: playReveal,
+        playHide: playHide,
+        isPlaying: isPlaying
+      };
     };
   </script>
 
@@ -1304,8 +2050,19 @@ background-size: 200% 100%;
           { el: grad, cursor: cursor }
         ],
         onComplete: function () {
+          // 收集标题全部字符（按显示顺序：黑色段在前、渐变段在后），
+          // 供后续“逐字逆序消失”使用。逆序退场 = 从数组末尾往前移除 .mlb-visible。
+          var darkChars = Array.prototype.slice.call(dark.querySelectorAll('.mlb-char'));
+          var gradChars = Array.prototype.slice.call(grad.querySelectorAll('.mlb-char'));
+          window.__s3TitleChars = darkChars.concat(gradChars);
           setTimeout(function () {
             if (sub) sub.classList.add('s3-sub-show');
+            // 打字机+副标题完整呈现后，开闸放行第二阶段叙事驱动，
+            // 并以“此刻的滚动位置”为进度基准 p=0：用户继续下滑才开始
+            // 「标题原位替换 + 图片立起变清晰」，保证四步严格按先后顺序、不互相打架。
+            window.__s3TypeDone = true;
+            window.__s3DriveBaseY = window.scrollY;
+            window.dispatchEvent(new Event('s3-type-done'));
           }, SUB_DELAY);
         }
       });
@@ -1318,20 +2075,491 @@ background-size: 200% 100%;
         reveal.init();
       }
 
-      // 滚动进入视口时触发一次
-      if ('IntersectionObserver' in window) {
-        var io = new IntersectionObserver(function (entries) {
-          entries.forEach(function (e) {
-            if (e.isIntersecting) { start(); io.disconnect(); }
-          });
-        }, { threshold: 0.6 });
-        io.observe(screen3);
-      } else {
-        window.addEventListener('scroll', function () {
-          var rect = screen3.getBoundingClientRect();
-          if (rect.top < window.innerHeight * 0.8) start();
-        }, { passive: true });
+      // ====== 触发联动：绑定第二屏「数据卡片」离场 ======
+      // 需求：当第二屏卡片正在滑出屏幕（快走完、还没完全离场）时，
+      // 第三屏标题就开始淡入，做一点重叠衔接，而不是等卡片彻底走光才出现。
+      // 实现：监测 .stat-cards 卡片底边相对视口顶部的位置。卡片随页面上滚，
+      // 其底边 rect.bottom 会从“视口下方(大)”一路减小，越过视口顶部时 rect.bottom=0
+      // （此刻卡片完全离场）。我们在它还差 CARD_LEAVE_RATIO * 视口高 离场时就触发，
+      // 即卡片“快走完”那一刻标题开始出现 → 形成离场/入场的重叠衔接。
+      var cardsEl = document.querySelector('.stat-cards');
+      // 卡片底边距视口顶部还剩多少视口高度时触发（0.10 = 还剩 10% 屏高，即卡片快走完）。
+      // 调大 → 标题更早出现（重叠更多）；调小/为 0 → 卡片完全离场后才出现。
+      var CARD_LEAVE_RATIO = 0.10;
+      function onScrollCheck() {
+        if (started) return;
+        if (cardsEl) {
+          // 主逻辑：用卡片离场进度触发
+          var cr = cardsEl.getBoundingClientRect();
+          if (cr.bottom <= window.innerHeight * CARD_LEAVE_RATIO) {
+            start();
+          }
+          return;
+        }
+        // 兜底：万一找不到卡片元素，退回原“标题滚到视口 78%”逻辑，保证标题不会永不出现。
+        var rect = screen3.getBoundingClientRect();
+        if (rect.top <= window.innerHeight * 0.78) {
+          start(); // start() 内已置 started=true，rafLoop 下一帧自动停止
+        }
       }
+      // 用持续 rAF 轮询触发（而非仅 scroll 事件），避免某些环境下 scroll
+      // 不触发导致打字机不启动、进而整段叙事门控（__s3TypeDone）永不放行。
+      function rafLoop() {
+        if (started) return; // 触发后停止轮询
+        onScrollCheck();
+        window.requestAnimationFrame(rafLoop);
+      }
+      window.requestAnimationFrame(rafLoop);
+      // 双保险：再挂一个 scroll 事件兜底。某些环境（窗口失焦/后台标签）下
+      // requestAnimationFrame 会被浏览器节流甚至暂停，仅靠 rAF 轮询可能不触发；
+      // scroll 事件不依赖 rAF，可在这些情况下兜底唤起打字机。
+      window.addEventListener('scroll', onScrollCheck, { passive: true });
+      onScrollCheck(); // 初始若已在该位置则立即触发
+    })();
+  </script>
+
+  <!-- 第三屏分层叙事（参考 Tabbit 首屏）：三步滚动驱动切换。
+       段落1：旧标题淡出 →"第一步 选商品" + 图片立正。
+       段落2："第一步"切到"第二步 配装修" + 图片 step-1→step-2。
+       段落3："第二步"切到"第三步 自动开播" + 图片 step-2→step-3。 -->
+  <script>
+    (function () {
+      var imgContainer = document.querySelector('.steps-section .step-image');
+      var row = document.querySelector('.steps-section .step-row');
+      var screen3 = document.querySelector('.screen3');
+      var heading = document.querySelector('.steps-section .step-heading');
+      var oldSub = document.querySelector('.screen3-sub');
+      var oldTitle = document.querySelector('.screen3-title');
+      var zone = document.querySelector('.s3-pin-zone');
+      if (!imgContainer || !screen3 || !zone) return;
+
+      /* ============================================================
+       * 三步切换数据
+       * ============================================================ */
+      var STEPS = [
+        { num: '第一步', name: '选商品', sub: '选好直播间中所要售卖的商品，讲解词+卖点话术全自动生成', img: 'assets/step-1.png?v=2' },
+        { num: '第二步', name: '配装修', sub: '300+数字人形象库里选一个，直播间背景装修一步到位', img: 'assets/step-2.png?v=2' },
+        { num: '第三步', name: '自动开播', sub: '合成完成后7×24全天候，关掉电脑也不停，边聊边卖不漏单', img: 'assets/step-3.png?v=3' }
+      ];
+      var currentStep = 0; // 当前显示的步骤索引（0=第一步）
+
+      /* ============================================================
+       * 可定制参数
+       * ============================================================ */
+      // 图片立起（透视）—— 起止值需与 CSS 初始变量一致
+      var TILT_START = 22,   TILT_END = 0;
+      var LIFT_START = 0,    LIFT_END = 0;
+      var SCALE_START = 0.96, SCALE_END = 1;
+      var BLUR_START = 1.2,  BLUR_END = 0;
+      var OPACITY_START = 0.92, OPACITY_END = 1;
+      var SHIFT_START = 20,  SHIFT_END = 0;
+// 三步态时图片 top = 副标题底部相对 pin-stage 的偏移 + gap（运行时动态计算）
+// 从 CSS 变量 --step-sub-img-gap 读取，方便在 :root 中统一调整
+var STEP_GAP = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--step-sub-img-gap')) || 80;
+function calcStepRowTop() {
+  var sub = document.querySelector('.step-heading-sub');
+  var stage = document.querySelector('.s3-pin-stage');
+  if (!sub || !stage) return '253px';
+  var subBottom = sub.getBoundingClientRect().bottom - stage.getBoundingClientRect().top;
+  return Math.round(subBottom + STEP_GAP) + 'px';
+}
+var STEP_ROW_TOP = calcStepRowTop();
+
+// 暴露给调参面板使用
+window.__step = {
+  getGap: function() { return STEP_GAP; },
+  setGap: function(v) { STEP_GAP = v; },
+  calcTop: calcStepRowTop,
+  getRow: function() { return row; },
+  clearCache: function() { _stepRowTopPx = null; },
+  isSeg1Done: function() { return seg1Done; }
+};
+
+      // 驱动距离(px)：等于 pin-zone 可滚动行程，p = scrolled / DRIVE_DISTANCE。
+      var DRIVE_DISTANCE = zone.offsetHeight - window.innerHeight;
+
+      // ─── 进度分段 ───
+      // 段1 [0, 0.7]：旧标题淡出 → "第一步 选商品" + 图片立正（滚动驱动）
+      // 段1完成后，步骤切换由 wheel 事件触发（一滑即切），不再需要滚动行程。
+      var STEP_BOUNDARIES = [0, 0.7, 0.85, 1.0];
+
+      // 段1 内部时序
+      var HEAD_SWITCH_AT = 0.4;  // 段1局部进度40%处切换旧→新标题（约 84vh 滚动行程完成淡出）
+      var IMG_FROM = 0.05, IMG_TO = 0.85; // 保留（已不再用于滚动驱动，仅兼容）
+
+      var reduceMotion = window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+      // 把整段进度 p 映射到某个子区间 [from,to] 内的 0→1
+      function sub(p, from, to) { return clamp((p - from) / (to - from), 0, 1); }
+      function ease(t) { return 1 - Math.pow(1 - t, 3); } // easeOutCubic、用于标题替换（希望快、利落）
+      // easeInOutCubic：首尾慢、中段匀速。用于图片立起，让立起/变清晰
+      // 在整个区间里均匀展开，避免 easeOutCubic 那种“前 1/3 就冲到 80%、
+      // 后面一大段几乎不动”的集中感。
+      function easeIO(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2; }
+      // 图片立起专用缓动：接近线性、仅末尾轻微减速收口（easeOutQuad 的温和版）。
+      // 这样从头到尾都在匀速立起/变清晰，视觉上“一路慢慢起来”而不是突然完成。
+      function easeImg(t) { return 1 - (1 - t) * (1 - t) * 0.6 - (1 - t) * 0.4; }
+      function lerp(a, b, t) { return a + (b - a) * t; }
+
+      /* ---------- 标题逐字切换 + 三步图片切换 ---------- */
+      var newSub = document.querySelector('.step-heading-sub');
+      var numEl = document.querySelector('.step-heading-num');
+      var nameEl = document.querySelector('.step-heading-name');
+      var cursorEl = document.querySelector('.step-heading-cursor');
+      var imgEl = imgContainer.querySelector('img');
+
+      // 新标题逐字控制器
+      var newHeadReveal = null;
+      (function buildNewHeadReveal() {
+        if (!numEl || !nameEl || !window.createMlbReveal) return;
+        newHeadReveal = window.createMlbReveal({
+          segments: [
+            { el: numEl, cursor: cursorEl },
+            { el: nameEl, cursor: cursorEl }
+          ]
+        });
+        newHeadReveal.ensureBuilt();
+        newHeadReveal.hideAllInstant();
+      })();
+      window.stepHeadingReveal = newHeadReveal;
+
+      // ─── 标题状态机 ───
+      var s3TitleState = 'old';   // 'old' | 'step' (步骤态，显示 step-heading)
+      var s3TitleApplied = false;
+      var titleTransitioning = false;
+
+      // 瞬时切换标题态（仅控制文字显隐，图片由 update 驱动）
+      function applyTitleStateInstant(state) {
+        if (state === 'step') {
+          if (window.screen3Reveal && window.screen3Reveal.hideAllInstant) window.screen3Reveal.hideAllInstant();
+          if (oldTitle) oldTitle.style.opacity = '0';
+          if (oldSub) { oldSub.classList.remove('s3-sub-show'); oldSub.style.opacity = '0'; }
+          if (heading) heading.classList.add('step-heading-ready');
+          if (newHeadReveal && newHeadReveal.showAllInstant) newHeadReveal.showAllInstant();
+          if (newSub) newSub.classList.add('step-heading-sub-show');
+        } else {
+          if (newHeadReveal && newHeadReveal.hideAllInstant) newHeadReveal.hideAllInstant();
+          if (newSub) newSub.classList.remove('step-heading-sub-show');
+          if (heading) heading.classList.remove('step-heading-ready');
+          if (oldTitle) oldTitle.style.opacity = '';
+          if (oldSub) oldSub.style.opacity = '';
+          var oldChars = window.__s3TitleChars;
+          var oldAlreadyShown = oldChars && oldChars.length &&
+            oldChars[oldChars.length - 1].classList.contains('mlb-visible');
+          if (!oldAlreadyShown && window.screen3Reveal && window.screen3Reveal.showAllInstant) {
+            window.screen3Reveal.showAllInstant();
+          }
+          if (oldSub) oldSub.classList.add('s3-sub-show');
+        }
+        s3TitleState = state;
+        s3TitleApplied = true;
+        titleTransitioning = false;
+        if (state === 'step') flushPendingStep();
+      }
+
+      // 请求切换标题态（带快速逐字动画，仅文字；图片由 update 滚动驱动）
+      function requestTitlePhase(wantStep) {
+        var target = wantStep ? 'step' : 'old';
+        if (!s3TitleApplied) { applyTitleStateInstant(target); return; }
+        if (target === s3TitleState) return;
+        if (titleTransitioning) return;
+        titleTransitioning = true;
+
+        if (target === 'step') {
+          // old → step：旧标题瞬时隐藏，新标题快速逐字出现
+          if (window.screen3Reveal && window.screen3Reveal.hideAllInstant) window.screen3Reveal.hideAllInstant();
+          if (oldSub) { oldSub.classList.remove('s3-sub-show'); oldSub.style.opacity = '0'; }
+          if (oldTitle) oldTitle.style.opacity = '0';
+          if (heading) heading.classList.add('step-heading-ready');
+
+          if (newHeadReveal && newHeadReveal.playReveal) {
+            newHeadReveal.playReveal(function () {
+              if (newSub) newSub.classList.add('step-heading-sub-show');
+              s3TitleState = 'step';
+              titleTransitioning = false;
+              flushPendingStep();
+            }, 30);
+          } else {
+            if (newHeadReveal && newHeadReveal.showAllInstant) newHeadReveal.showAllInstant();
+            if (newSub) newSub.classList.add('step-heading-sub-show');
+            s3TitleState = 'step';
+            titleTransitioning = false;
+            flushPendingStep();
+          }
+        } else {
+          // step → old：新标题瞬时隐藏，旧标题快速逐字出现
+          if (newHeadReveal && newHeadReveal.hideAllInstant) newHeadReveal.hideAllInstant();
+          if (newSub) newSub.classList.remove('step-heading-sub-show');
+          if (heading) heading.classList.remove('step-heading-ready');
+          if (oldTitle) oldTitle.style.opacity = '';
+          if (oldSub) oldSub.style.opacity = '';
+
+          if (window.screen3Reveal && window.screen3Reveal.playReveal) {
+            window.screen3Reveal.playReveal(function () {
+              if (oldSub) oldSub.classList.add('s3-sub-show');
+              s3TitleState = 'old';
+              titleTransitioning = false;
+            }, 30);
+          } else {
+            if (window.screen3Reveal && window.screen3Reveal.showAllInstant) window.screen3Reveal.showAllInstant();
+            if (oldSub) oldSub.classList.add('s3-sub-show');
+            s3TitleState = 'old';
+            titleTransitioning = false;
+          }
+        }
+        // 保底超时
+        setTimeout(function () {
+          if (titleTransitioning) applyTitleStateInstant(target);
+        }, 2000);
+      }
+
+      // ─── 步骤间标题/图片切换（step-to-step） ───
+      // 当 currentStep 变化时：
+      //   文本：逐字倒回消失 → 更新文字 → 逐字正向出现
+      //   图片：旧图向右滑出，新图从右向左滑入
+      var stepSwitching = false; // 防重入
+      function switchToStep(idx) {
+        if (idx === currentStep) return;
+        if (stepSwitching) return; // 切换动画进行中，忽略
+        var step = STEPS[idx];
+        currentStep = idx;
+        stepSwitching = true;
+
+        // ── 文本：先逐字倒回消失 ──
+        if (newSub) newSub.classList.remove('step-heading-sub-show');
+
+        var doHide = function (done) {
+          if (newHeadReveal && newHeadReveal.playHide) {
+            newHeadReveal.playHide(done);
+          } else {
+            if (newHeadReveal && newHeadReveal.hideAllInstant) newHeadReveal.hideAllInstant();
+            done();
+          }
+        };
+
+        doHide(function () {
+          // 隐藏完成 → 更新 data-text 并重建 reveal
+          numEl.setAttribute('data-text', step.num);
+          nameEl.setAttribute('data-text', step.name);
+          newSub.textContent = step.sub;
+
+          // 重建逐字控制器
+          newHeadReveal = window.createMlbReveal({
+            segments: [
+              { el: numEl, cursor: cursorEl },
+              { el: nameEl, cursor: cursorEl }
+            ]
+          });
+          newHeadReveal.ensureBuilt();
+          window.stepHeadingReveal = newHeadReveal;
+
+          // 正向逐字出现
+          var doReveal = function (done) {
+            if (newHeadReveal && newHeadReveal.playReveal) {
+              newHeadReveal.playReveal(done);
+            } else {
+              newHeadReveal.showAllInstant();
+              done();
+            }
+          };
+          doReveal(function () {
+            if (newSub) newSub.classList.add('step-heading-sub-show');
+            stepSwitching = false;
+            // 切换完成后再检查一次，防止滚动期间已越过下一段
+            flushPendingStep();
+          });
+        });
+
+        // ── 图片：旧图向右滑出，新图从右向左滑入 ──
+        var oldImg = imgEl;
+        var newImg = document.createElement('img');
+        newImg.src = step.img;
+        newImg.alt = step.num + ' ' + step.name;
+        newImg.className = 'step-img-enter';
+        imgContainer.appendChild(newImg);
+
+        // 触发 reflow 后添加动画类
+        void newImg.offsetWidth;
+        oldImg.classList.add('step-img-exit');
+        newImg.classList.remove('step-img-enter');
+        newImg.classList.add('step-img-active');
+
+        // 动画结束后清理旧图
+        setTimeout(function () {
+          if (oldImg.parentNode) oldImg.parentNode.removeChild(oldImg);
+          imgEl = newImg;
+          newImg.className = ''; // 清除动画类
+        }, 550);
+      }
+
+      // ─── 步骤目标追踪 ───
+      var pendingStep = 0; // 目标步骤
+
+      // 当标题进入 step 态后，检查是否有待执行的步骤切换
+      function flushPendingStep() {
+        if (s3TitleState === 'step' && pendingStep !== currentStep) {
+          switchToStep(pendingStep);
+        }
+      }
+
+      // ─── 段1完成标记 ───
+      var seg1Done = false; // 段1（图片立正+第一步标题）是否已完成
+
+      // ─── 主 update 函数：标题上移 + 图片立起 同步由滚动驱动 ───
+      var lastP = -1;
+      // 三步态 row.top 目标值（每次 heading 显示后动态计算）
+      var _stepRowTopPx = null;
+      function getStepRowTopPx() {
+        // 只有 heading 可见时才能拿到正确尺寸
+        if (_stepRowTopPx !== null) return _stepRowTopPx;
+        var headingEl = document.querySelector('.step-heading');
+        if (!headingEl || !headingEl.classList.contains('step-heading-ready')) {
+          // heading 未显示时用预估值
+          return 228;
+        }
+        var val = calcStepRowTop();
+        _stepRowTopPx = parseInt(val, 10) || 228;
+        return _stepRowTopPx;
+      }
+      // 前置态 row.top 的像素值（40vh）
+      function getPreRowTopPx() { return Math.round(window.innerHeight * 0.40); }
+
+      function update() {
+        var p = 0;
+        var __rectTop = zone.getBoundingClientRect().top;
+        // 门控：pin-zone 钉住即放行
+        if (!window.__s3TypeDone && __rectTop <= 0) {
+          window.__s3TypeDone = true;
+        }
+        if (window.__s3TypeDone) {
+          p = clamp((-__rectTop) / DRIVE_DISTANCE, 0, 1);
+        }
+        if (p === lastP) return;
+        lastP = p;
+
+        // ─── 段1 [0, seg1End]：旧标题上移淡出 + 图片立起，同步进行 ───
+        var seg1End = STEP_BOUNDARIES[1]; // 0.7
+        // 整个段1的归一化进度 t: 0→1
+        var t = sub(p, 0, seg1End);
+        var tEased = easeImg(t); // 缓动后的进度（图片+位移）
+
+        // 1) 旧标题上移+淡出（前半段快速完成：t 0→0.5 时标题完全消失）
+        var headT = clamp(t / 0.5, 0, 1); // 标题在段1前半完成消失
+        var riseVal = -108 * headT;
+        var fadeVal = 1 - headT;
+        screen3.style.setProperty('--s3-rise', riseVal.toFixed(1) + 'px');
+        screen3.style.setProperty('--s3-fade', fadeVal.toFixed(3));
+
+        // 2) 图片立起：tilt/scale/blur/opacity 随 tEased 线性插值
+        if (!seg1Done) {
+          var curTilt = lerp(TILT_START, TILT_END, tEased);
+          var curScale = lerp(SCALE_START, SCALE_END, tEased);
+          var curBlur = lerp(BLUR_START, BLUR_END, tEased);
+          var curOpacity = lerp(OPACITY_START, OPACITY_END, tEased);
+          var curShift = lerp(SHIFT_START, SHIFT_END, tEased);
+          imgContainer.style.setProperty('--step-tilt', curTilt.toFixed(2) + 'deg');
+          imgContainer.style.setProperty('--step-scale', curScale.toFixed(4));
+          imgContainer.style.setProperty('--step-blur', curBlur.toFixed(2) + 'px');
+          imgContainer.style.setProperty('--step-opacity', curOpacity.toFixed(4));
+          if (row) row.style.setProperty('--step-shift', curShift.toFixed(1) + 'px');
+
+          // 3) row.top 从前置态(40vh)平滑过渡到三步态目标(calcStepRowTop)
+          var preTop = getPreRowTopPx();
+          var stepTop = getStepRowTopPx();
+          var curTop = lerp(preTop, stepTop, tEased);
+          if (row) row.style.top = Math.round(curTop) + 'px';
+        }
+
+        // 段1未完成时 pendingStep 为 0（第一步）；完成后由 wheel 事件管理
+        if (!seg1Done) {
+          pendingStep = 0;
+        }
+
+        // 标题切换：t >= 0.5 时旧标题已消失，切到步骤态显示新标题
+        var wantStep = t >= 0.5;
+        requestTitlePhase(wantStep);
+
+        // 段1完成检测：t 到 1 时固定终态（不再锁定页面）
+        if (t >= 1 && !seg1Done) {
+          seg1Done = true;
+          // 确保终态精确
+          if (row) { row.style.setProperty('--step-shift', SHIFT_END + 'px'); row.style.top = calcStepRowTop(); }
+          imgContainer.style.setProperty('--step-tilt', TILT_END + 'deg');
+          imgContainer.style.setProperty('--step-scale', SCALE_END);
+          imgContainer.style.setProperty('--step-blur', BLUR_END + 'px');
+          imgContainer.style.setProperty('--step-opacity', OPACITY_END);
+        }
+
+        // 滚回检测：p 回退到段1之前，恢复前置态
+        if (t < 0.5 && seg1Done) {
+          seg1Done = false;
+          stepsFinished = false;
+          scrollLocked = false;
+          _stepRowTopPx = null; // 清缓存，下次重新计算
+        }
+      }
+
+      // ─── 页面滚动：不再锁定，三步纵向展开正常滚动 ───
+      var scrollLocked = false;
+      var stepsFinished = false;
+
+      // ─── reduce motion ───
+      if (reduceMotion) {
+        if (row) row.style.setProperty('--step-shift', SHIFT_END + 'px');
+        imgContainer.style.setProperty('--step-tilt', TILT_END + 'deg');
+        imgContainer.style.setProperty('--step-lift', LIFT_END + 'px');
+        imgContainer.style.setProperty('--step-scale', SCALE_END);
+        imgContainer.style.setProperty('--step-blur', BLUR_END + 'px');
+        imgContainer.style.setProperty('--step-opacity', OPACITY_END);
+        screen3.style.setProperty('--s3-rise', '-108px');
+        screen3.style.setProperty('--s3-fade', '0');
+        applyTitleStateInstant('step');
+        switchToStep(2); // 直接显示最终步骤
+        return;
+      }
+
+      // ─── 驱动循环 ───
+      function tick() {
+        if (!window.__s3Freeze) update();
+        window.requestAnimationFrame(tick);
+      }
+      window.addEventListener('resize', function () {
+        DRIVE_DISTANCE = zone.offsetHeight - window.innerHeight;
+        lastP = -1;
+        if (!window.__s3Freeze) update();
+      }, { passive: true });
+      window.addEventListener('s3-type-done', function () {
+        lastP = -1;
+        update();
+      });
+      window.addEventListener('scroll', function () {
+        if (!window.__s3Freeze) update();
+      }, { passive: true });
+      update();
+      window.requestAnimationFrame(tick);
+
+      // ─── 调试钩子 ───
+      window.__s3GotoP = function (target) {
+        window.__s3Freeze = false;
+        var vh = window.innerHeight;
+        var travel = zone.offsetHeight - vh;
+        var zoneTop = zone.getBoundingClientRect().top + window.scrollY;
+        window.__s3TypeDone = true;
+        window.scrollTo(0, Math.round(zoneTop + clamp(target, 0, 1) * travel));
+        lastP = -1; update();
+        requestAnimationFrame(function () { lastP = -1; update(); });
+        window.__s3Freeze = true;
+        return { travel: travel, zoneTop: zoneTop, scrollY: window.scrollY, p: target };
+      };
+      window.__s3Unfreeze = function () { window.__s3Freeze = false; lastP = -1; };
+      window.__s3State = function () {
+        return { seg1Done: seg1Done, s3TitleState: s3TitleState, currentStep: currentStep, pendingStep: pendingStep, stepSwitching: stepSwitching, stepsFinished: stepsFinished, scrollLocked: scrollLocked };
+      };
+      window.__s3P = function () {
+        var zTop = zone.getBoundingClientRect().top;
+        return clamp((-zTop) / DRIVE_DISTANCE, 0, 1);
+      };
     })();
   </script>
 
@@ -1513,6 +2741,789 @@ background-size: 200% 100%;
         window.lifeBackground = life;
         if (!reduceMotion) life.init();
       }
+    })();
+  </script>
+
+  <!-- 第四屏：滚动入场逐字动画 -->
+  <script>
+    (function () {
+      var section = document.querySelector('.screen4');
+      if (!section || !window.createMlbReveal) return;
+
+      var darkEl = section.querySelector('.screen4-title-left');
+      var highlightEl = section.querySelector('.screen4-title-right span[data-text]');
+      var cursorEl = section.querySelector('.screen4-cursor');
+      var subEl = section.querySelector('.screen4-sub');
+      if (!darkEl || !highlightEl || !cursorEl || !subEl) return;
+
+      // 构建标题逐字控制器（黑色段 + 渐变段，共享一个光标）
+      var titleReveal = window.createMlbReveal({
+        segments: [
+          { el: darkEl, cursor: cursorEl },
+          { el: highlightEl, cursor: cursorEl }
+        ]
+      });
+      titleReveal.ensureBuilt();
+
+      // 构建副标题逐字控制器（无光标，直接逐字出现）
+      var subReveal = window.createMlbReveal({
+        segments: [{ el: subEl }]
+      });
+      subReveal.ensureBuilt();
+
+      var triggered = false;
+
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting && !triggered) {
+            triggered = true;
+            observer.unobserve(entry.target);
+            // 标题逐字出现，完成后副标题逐字出现
+            titleReveal.playReveal(function () {
+              subReveal.playReveal();
+            });
+          }
+        });
+      }, { threshold: 0.3 });
+
+      observer.observe(section);
+    })();
+  </script>
+
+  <!-- 步骤卡片（第二步、第三步）打字机效果 -->
+  <script>
+    (function () {
+      var cards = document.querySelectorAll('[data-step-card]');
+      if (!cards.length || !window.createMlbReveal) return;
+
+      cards.forEach(function (card) {
+        var numEl = card.querySelector('.step-card-num');
+        var nameEl = card.querySelector('.step-card-name');
+        var cursorEl = card.querySelector('.step-card-cursor');
+        var subEl = card.querySelector('.step-card-sub');
+        if (!numEl || !nameEl || !cursorEl || !subEl) return;
+
+        // 构建标题逐字控制器（数字段 + 名称段，共享光标）
+        var titleReveal = window.createMlbReveal({
+          segments: [
+            { el: numEl, cursor: cursorEl },
+            { el: nameEl, cursor: cursorEl }
+          ]
+        });
+        titleReveal.ensureBuilt();
+
+        // 构建副标题逐字控制器（无光标）
+        var subReveal = window.createMlbReveal({
+          segments: [{ el: subEl }]
+        });
+        subReveal.ensureBuilt();
+
+        var triggered = false;
+
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting && !triggered) {
+              triggered = true;
+              observer.unobserve(entry.target);
+              // 标题逐字出现 → 副标题逐字出现(20ms/字) → 图片淡入
+              titleReveal.playReveal(function () {
+                subReveal.playReveal(function () {
+                  card.classList.add('step-card-revealed');
+                }, 20);
+              });
+            }
+          });
+        }, { threshold: 0.3 });
+
+        observer.observe(card);
+      });
+    })();
+  </script>
+
+  <!-- Three.js 白模背景渲染：光晕折射（薄膜干涉）+ 扫描网格 + 鼠标跟随旋转 -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+    (function () {
+      const canvas = document.getElementById('modelCanvas');
+      if (!canvas) return;
+
+      const section = document.getElementById('screen4Section');
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setClearColor(0xffffff, 1);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xffffff);
+      const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
+
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      keyLight.position.set(-3, 4, 3);
+      scene.add(keyLight);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+      scene.add(ambientLight);
+
+      const fillLight = new THREE.DirectionalLight(0xffffff, 0.2);
+      fillLight.position.set(2, -1, 1);
+      scene.add(fillLight);
+
+      // Uniforms
+      const uniforms = {
+        time: { value: 0 },
+        baseColor: { value: new THREE.Color(0xf5f5f5) },
+        ambientStrength: { value: 0.9 },
+        specularStrength: { value: 0.5 },
+        shininess: { value: 32.0 },
+        fresnelStrength: { value: 0.3 },
+        fresnelPow: { value: 3.0 },
+        // 光晕折射（薄膜干涉）
+        iriIntensity: { value: 0.35 },
+        filmThickness: { value: 400.0 },
+        thicknessVar: { value: 150.0 },
+        edgeBias: { value: 2.0 },
+        iriSpeed: { value: 0.4 },
+        dispersion: { value: 1.2 },
+        scrollProgress: { value: 0.0 },
+        // 扫描网格
+        gridColor: { value: new THREE.Color(0x8b7cf7) },
+        gridDensity: { value: 12.0 },
+        gridLineWidth: { value: 0.01 },
+        gridIntensity: { value: 0.25 },
+        scanSpeed: { value: 1.9 },
+        scanWidth: { value: 0.27 },
+        // 模型范围
+        modelYMin: { value: -0.6 },
+        modelYMax: { value: 0.6 }
+      };
+
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        transparent: true,
+        vertexShader: `
+          varying vec3 vNormal;
+          varying vec3 vWorldPosition;
+          varying vec3 vViewDir;
+          varying vec3 vWorldNormal;
+          void main() {
+            vNormal = normalize(normalMatrix * normal);
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPosition = worldPos.xyz;
+            vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+            vViewDir = normalize(cameraPosition - worldPos.xyz);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float time;
+          uniform vec3 baseColor;
+          uniform float ambientStrength;
+          uniform float specularStrength;
+          uniform float shininess;
+          uniform float fresnelStrength;
+          uniform float fresnelPow;
+
+          // 光晕折射参数
+          uniform float iriIntensity;
+          uniform float filmThickness;
+          uniform float thicknessVar;
+          uniform float edgeBias;
+          uniform float iriSpeed;
+          uniform float dispersion;
+          uniform float scrollProgress;
+
+          // 扫描网格
+          uniform vec3 gridColor;
+          uniform float gridDensity;
+          uniform float gridLineWidth;
+          uniform float gridIntensity;
+          uniform float scanSpeed;
+          uniform float scanWidth;
+
+          uniform float modelYMin;
+          uniform float modelYMax;
+
+          varying vec3 vNormal;
+          varying vec3 vWorldPosition;
+          varying vec3 vViewDir;
+          varying vec3 vWorldNormal;
+
+          // 将波长(nm)转换为可见光RGB颜色
+          vec3 wavelengthToRGB(float wavelength) {
+            float w = clamp((wavelength - 380.0) / 400.0, 0.0, 1.0);
+            float r = exp(-pow((w - 0.75) * 3.5, 2.0));
+            float g = exp(-pow((w - 0.45) * 3.0, 2.0));
+            float b = exp(-pow((w - 0.15) * 3.5, 2.0));
+            return vec3(r, g, b);
+          }
+
+          // 薄膜干涉
+          vec3 thinFilmInterference(float cosTheta, float thickness) {
+            float n = 1.33;
+            float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+            float sinThetaR = sinTheta / n;
+            float cosThetaR = sqrt(1.0 - sinThetaR * sinThetaR);
+            float opticalPath = 2.0 * n * thickness * cosThetaR;
+
+            vec3 color = vec3(0.0);
+            for (float i = 0.0; i < 3.0; i += 1.0) {
+              float order = i + 1.0;
+              float lambda = opticalPath / order;
+              if (lambda >= 380.0 && lambda <= 780.0) {
+                float intensity = 1.0 / (order * 0.7 + 0.3);
+                color += wavelengthToRGB(lambda) * intensity;
+              }
+            }
+
+            float phase = mod(opticalPath * dispersion / 550.0, 1.0) * 400.0 + 380.0;
+            vec3 spectralColor = wavelengthToRGB(phase);
+            color = mix(spectralColor, color, 0.4);
+            return color;
+          }
+
+          // 3D噪声
+          float hash(vec3 p) {
+            p = fract(p * vec3(443.897, 441.423, 437.195));
+            p += dot(p, p.yzx + 19.19);
+            return fract((p.x + p.y) * p.z);
+          }
+
+          float noise3D(vec3 p) {
+            vec3 i = floor(p);
+            vec3 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float n000 = hash(i);
+            float n100 = hash(i + vec3(1.0, 0.0, 0.0));
+            float n010 = hash(i + vec3(0.0, 1.0, 0.0));
+            float n110 = hash(i + vec3(1.0, 1.0, 0.0));
+            float n001 = hash(i + vec3(0.0, 0.0, 1.0));
+            float n101 = hash(i + vec3(1.0, 0.0, 1.0));
+            float n011 = hash(i + vec3(0.0, 1.0, 1.0));
+            float n111 = hash(i + vec3(1.0, 1.0, 1.0));
+            float nx00 = mix(n000, n100, f.x);
+            float nx10 = mix(n010, n110, f.x);
+            float nx01 = mix(n001, n101, f.x);
+            float nx11 = mix(n011, n111, f.x);
+            float nxy0 = mix(nx00, nx10, f.y);
+            float nxy1 = mix(nx01, nx11, f.y);
+            return mix(nxy0, nxy1, f.z);
+          }
+
+          void main() {
+            vec3 normal = normalize(vNormal);
+            vec3 viewDir = normalize(vViewDir);
+
+            // === 基础光照（白模）===
+            vec3 lightDir = normalize(vec3(-3.0, 4.0, 3.0));
+            float diff = max(dot(normal, lightDir), 0.0);
+            vec3 color = baseColor * (ambientStrength + diff * (1.0 - ambientStrength));
+
+            // Blinn-Phong 高光
+            vec3 halfDir = normalize(lightDir + viewDir);
+            float spec = pow(max(dot(normal, halfDir), 0.0), shininess);
+            color += vec3(1.0) * spec * specularStrength;
+
+            // 菲涅尔边缘光
+            float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), fresnelPow);
+            color += vec3(1.0) * fresnel * fresnelStrength;
+
+            // === 光晕折射（薄膜干涉）===
+            float NdotV = max(dot(normal, viewDir), 0.0);
+
+            vec3 noiseCoord = vWorldPosition * 3.0 + vec3(time * iriSpeed * 0.3, time * iriSpeed * 0.2, time * iriSpeed * 0.1);
+            float thicknessNoise = noise3D(noiseCoord);
+
+            vec3 noiseCoord2 = vWorldPosition * 1.2 + vec3(time * iriSpeed * 0.15, -time * iriSpeed * 0.1, time * iriSpeed * 0.05);
+            float thicknessNoise2 = noise3D(noiseCoord2);
+
+            float combinedNoise = mix(thicknessNoise, thicknessNoise2, 0.5);
+
+            float scrollOffset = scrollProgress * 900.0;
+            float thickness = filmThickness + scrollOffset + thicknessVar * (combinedNoise * 2.0 - 1.0);
+
+            vec3 iriColor = thinFilmInterference(NdotV, thickness);
+
+            float edgeFactor = pow(1.0 - NdotV, edgeBias);
+            float specHighlight = pow(max(dot(normal, halfDir), 0.0), shininess * 0.5) * 0.3;
+            float iriMask = clamp(edgeFactor + specHighlight, 0.0, 1.0);
+
+            vec3 iriContribution = min(iriColor * iriMask * iriIntensity, vec3(0.4));
+            color += iriContribution;
+
+            // === 扫描网格 ===
+            float normalizedY = clamp((vWorldPosition.y - modelYMin) / (modelYMax - modelYMin), 0.0, 1.0);
+
+            float scanPos = fract(time * scanSpeed * 0.5);
+            float scanDist = abs(normalizedY - scanPos);
+            scanDist = min(scanDist, 1.0 - scanDist);
+            float scanMask = smoothstep(scanWidth, 0.0, scanDist);
+
+            float parallaxOffset = scrollProgress * 1.0;
+            float coordY = (vWorldPosition.y + parallaxOffset) * gridDensity;
+            float coordX = vWorldPosition.x * gridDensity;
+            float lineY = 1.0 - step(gridLineWidth, abs(fract(coordY) - 0.5));
+            float lineX = 1.0 - step(gridLineWidth, abs(fract(coordX) - 0.5));
+            float grid = max(lineY, lineX);
+
+            float gridAlpha = grid * (scanMask * 0.7 + 0.3) * gridIntensity;
+            vec3 iriColorBright = normalize(iriColor + 0.01) * 1.2;
+            vec3 gridFinalColor = mix(gridColor, iriColorBright, 0.7);
+            color += gridFinalColor * gridAlpha;
+
+            // 模型始终可见（透明度 1）
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `
+      });
+
+      let modelYMin = -0.6;
+      let modelYMax = 0.6;
+      let modelLoaded = false;
+
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/libs/draco/');
+      const loader = new GLTFLoader();
+      loader.setDRACOLoader(dracoLoader);
+
+      loader.load('assets/digital-human.glb', function (gltf) {
+        const model = gltf.scene;
+        model.traverse(function (child) {
+          if (child.isMesh) {
+            child.material = material;
+            child.castShadow = false;
+            child.receiveShadow = false;
+          }
+        });
+
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+
+        model.position.sub(center);
+        scene.add(model);
+
+        modelYMin = -size.y / 2;
+        modelYMax = size.y / 2;
+        uniforms.modelYMin.value = modelYMin;
+        uniforms.modelYMax.value = modelYMax;
+
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const fov = camera.fov * (Math.PI / 180);
+        const dist = maxDim / (2 * Math.tan(fov / 2)) * 1.2;
+        camera.position.set(0, 0, dist);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+
+        modelLoaded = true;
+      });
+
+      // ===== 鼠标跟随旋转 =====
+      const maxRotation = 10 * (Math.PI / 180);
+      let targetRotationY = 0;
+      let currentRotationY = 0;
+
+      window.addEventListener('mousemove', (e) => {
+        const mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+        targetRotationY = mouseX * maxRotation;
+      });
+
+      // 滚动驱动光晕折射变化
+      function updateScroll() {
+        const rect = section.getBoundingClientRect();
+        const viewH = window.innerHeight;
+        const progress = 1 - (rect.bottom / (viewH + rect.height));
+        uniforms.scrollProgress.value = Math.max(0, Math.min(1, progress));
+      }
+      window.addEventListener('scroll', updateScroll, { passive: true });
+      updateScroll();
+
+      // 尺寸适配
+      function resize() {
+        const container = canvas.parentElement;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w === 0 || h === 0) return;
+        renderer.setSize(w, h, false);
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      resize();
+      window.addEventListener('resize', resize);
+      window.addEventListener('load', resize);
+
+      // 渲染循环
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        uniforms.time.value += delta;
+
+        // 平滑插值旋转（鼠标跟随缓动）
+        currentRotationY += (targetRotationY - currentRotationY) * 0.05;
+        scene.rotation.y = currentRotationY;
+
+        renderer.render(scene, camera);
+      }
+      animate();
+    })();
+  </script>
+
+  <!-- 图标链条波动动画（JS 驱动正弦波 + 水平滚动 + 页面滚动视差） -->
+  <script>
+    (function() {
+      var list = document.querySelector('.icon-list');
+      var items = document.querySelectorAll('.icon-item');
+      var marquee = document.querySelector('.icon-marquee');
+      if (!list || items.length === 0 || !marquee) return;
+
+      // 参数（可被面板覆盖）
+      window._iconWave = {
+        amplitude: 33,
+        frequency: 0.18,
+        speed: 0.9,
+        scrollSpeed: 0.6,
+        parallax: 0.3
+      };
+
+      // 无缝循环原理：HTML 中有 12 个原始 + 12 个克隆 = 24 个 icon-item
+      // 整个 list 宽度 = 24 * (100 + 25) - 25 = 2975px（假设 100px 图标 + 25px gap）
+      // 前半段宽度 = 12 * (100 + 25) = 1500px
+      // 当 translateX 超过 -前半段宽度 时，加回前半段宽度 → 视觉无缝
+
+      var halfWidth = 0; // 延迟计算
+
+      function calcHalfWidth() {
+        // 直接用 scrollWidth / 2，因为前后两半内容完全一样
+        halfWidth = list.scrollWidth / 2;
+      }
+
+      // 首次计算 + 窗口 resize 时重新计算
+      setTimeout(calcHalfWidth, 100); // 等 DOM 渲染完
+      window.addEventListener('resize', calcHalfWidth);
+
+      // 累计位移（只增不跳）
+      var offset = 0;
+
+      // 页面滚动视差
+      var lastScrollY = window.pageYOffset || 0;
+      var parallaxAccum = 0;
+      window.addEventListener('scroll', function() {
+        var sy = window.pageYOffset || 0;
+        var delta = sy - lastScrollY;
+        lastScrollY = sy;
+        parallaxAccum += delta * (window._iconWave.parallax || 0.3);
+      }, { passive: true });
+
+      function animateWave(time) {
+        requestAnimationFrame(animateWave);
+        if (halfWidth <= 0) { calcHalfWidth(); return; }
+
+        var w = window._iconWave;
+        var t = time * 0.001;
+
+        // 累计自动滚动
+        offset += w.scrollSpeed;
+
+        // 最终位移 = 自动滚动 + 视差（向左为负）
+        var x = -(offset + parallaxAccum);
+
+        // 用取模保证 x 始终在 [0, halfWidth) 范围内再取负
+        // 这样永远不会出现跳跃
+        var mod = ((x % halfWidth) + halfWidth) % halfWidth;
+        var finalX = -mod;
+
+        list.style.transform = 'translateX(' + finalX.toFixed(2) + 'px)';
+
+        // 正弦波 Y 偏移
+        for (var i = 0; i < items.length; i++) {
+          var y = Math.sin(t * w.speed + i * w.frequency) * w.amplitude;
+          items[i].style.transform = 'translateY(' + y.toFixed(1) + 'px)';
+        }
+      }
+
+      requestAnimationFrame(animateWave);
+    })();
+  </script>
+
+    <!-- 图标滚动区域调节面板 -->
+  <script>
+    (function() {
+      var panel = document.createElement('div');
+      panel.id = '_icon_panel';
+      panel.innerHTML = `
+        <div class="_ip_header"><span>图标区域调节</span><button id="_ip_toggle">−</button></div>
+        <div id="_ip_body">
+          <label><span>图标大小</span><input type="range" id="_ip_size" min="40" max="140" value="100"><span class="_ip_val" id="_ip_size_v">100px</span></label>
+          <label><span>图标内图大小</span><input type="range" id="_ip_img" min="14" max="80" value="32"><span class="_ip_val" id="_ip_img_v">32px</span></label>
+          <label><span>圆形底色</span><input type="color" id="_ip_bg" value="#fafafa"><span class="_ip_val" id="_ip_bg_v">#fafafa</span></label>
+          <label><span>图标颜色(滤镜)</span><input type="range" id="_ip_hue" min="0" max="360" value="0"><span class="_ip_val" id="_ip_hue_v">0°</span></label>
+          <label><span>图标透明度</span><input type="range" id="_ip_opacity" min="10" max="100" value="100"><span class="_ip_val" id="_ip_opacity_v">1.00</span></label>
+          <label><span>波动幅度</span><input type="range" id="_ip_amp" min="0" max="60" value="33"><span class="_ip_val" id="_ip_amp_v">33px</span></label>
+          <label><span>波长(链条感)</span><input type="range" id="_ip_freq" min="3" max="60" value="18"><span class="_ip_val" id="_ip_freq_v">0.18</span></label>
+          <label><span>波传播速度</span><input type="range" id="_ip_wspeed" min="2" max="40" value="9"><span class="_ip_val" id="_ip_wspeed_v">0.9</span></label>
+          <label><span>滚动速度</span><input type="range" id="_ip_scroll" min="1" max="30" value="6"><span class="_ip_val" id="_ip_scroll_v">0.6</span></label>
+          <label><span>间距</span><input type="range" id="_ip_gap" min="8" max="60" value="25"><span class="_ip_val" id="_ip_gap_v">25px</span></label>
+          <div class="_ip_actions"><button id="_ip_export">导出参数</button></div>
+          <pre id="_ip_output"></pre>
+        </div>
+      `;
+      document.body.appendChild(panel);
+
+      var style = document.createElement('style');
+      style.textContent = '#_icon_panel{position:fixed;top:70px;right:12px;z-index:999999;width:280px;background:rgba(20,20,30,0.94);backdrop-filter:blur(12px);border-radius:12px;font-family:-apple-system,"PingFang SC",sans-serif;font-size:12px;color:#eee;box-shadow:0 8px 40px rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);overflow:hidden}._ip_header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.1);font-weight:600;font-size:13px}._ip_header button{background:none;border:none;color:#999;font-size:16px;cursor:pointer;padding:0 4px;line-height:1}._ip_header button:hover{color:#fff}#_ip_body{padding:10px 16px}#_ip_body label{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;font-size:11px;color:#ccc}#_ip_body input[type="range"]{flex:1;max-width:90px;accent-color:#8b7cf7;height:4px}#_ip_body input[type="color"]{width:32px;height:22px;border:none;border-radius:4px;cursor:pointer;padding:0}._ip_val{min-width:44px;text-align:right;color:#8b7cf7;font-size:11px;font-variant-numeric:tabular-nums}._ip_actions{margin-top:8px}._ip_actions button{width:100%;padding:7px 0;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:500;background:#8b7cf7;color:#fff}._ip_actions button:hover{opacity:0.85}#_ip_output{margin-top:8px;padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;font-size:10px;color:#8b7cf7;white-space:pre-wrap;word-break:break-all;display:none;max-height:160px;overflow:auto}';
+      document.head.appendChild(style);
+
+
+      var items = document.querySelectorAll('.icon-item');
+      var imgs = document.querySelectorAll('.icon-item img');
+      var list = document.querySelector('.icon-list');
+
+      // 控件
+      var sizeR = document.getElementById('_ip_size');
+      var imgR = document.getElementById('_ip_img');
+      var bgR = document.getElementById('_ip_bg');
+      var hueR = document.getElementById('_ip_hue');
+      var opacityR = document.getElementById('_ip_opacity');
+      var ampR = document.getElementById('_ip_amp');
+      var freqR = document.getElementById('_ip_freq');
+      var wspeedR = document.getElementById('_ip_wspeed');
+      var scrollR = document.getElementById('_ip_scroll');
+      var gapR = document.getElementById('_ip_gap');
+
+      function update() {
+        var size = sizeR.value;
+        var imgSize = imgR.value;
+        var bg = bgR.value;
+        var hue = hueR.value;
+        var opacity = (opacityR.value / 100).toFixed(2);
+        var amp = parseInt(ampR.value);
+        var freq = (freqR.value / 100).toFixed(2);
+        var wspeed = (wspeedR.value / 10).toFixed(1);
+        var scrollSpeed = (scrollR.value / 10).toFixed(1);
+        var gap = gapR.value;
+
+        // 更新显示值
+        document.getElementById('_ip_size_v').textContent = size + 'px';
+        document.getElementById('_ip_img_v').textContent = imgSize + 'px';
+        document.getElementById('_ip_bg_v').textContent = bg;
+        document.getElementById('_ip_hue_v').textContent = hue + '°';
+        document.getElementById('_ip_opacity_v').textContent = opacity;
+        document.getElementById('_ip_amp_v').textContent = amp + 'px';
+        document.getElementById('_ip_freq_v').textContent = freq;
+        document.getElementById('_ip_wspeed_v').textContent = wspeed;
+        document.getElementById('_ip_scroll_v').textContent = scrollSpeed;
+        document.getElementById('_ip_gap_v').textContent = gap + 'px';
+
+        // 应用样式到图标
+        items.forEach(function(item) {
+          item.style.width = size + 'px';
+          item.style.height = size + 'px';
+          item.style.background = bg;
+        });
+
+        imgs.forEach(function(img) {
+          img.style.width = imgSize + 'px';
+          img.style.height = imgSize + 'px';
+          img.style.opacity = opacity;
+          img.style.filter = hue > 0 ? 'hue-rotate(' + hue + 'deg)' : 'none';
+        });
+
+        list.style.gap = gap + 'px';
+
+        // 更新 JS 波动参数
+        if (window._iconWave) {
+          window._iconWave.amplitude = amp;
+          window._iconWave.frequency = parseFloat(freq);
+          window._iconWave.speed = parseFloat(wspeed);
+          window._iconWave.scrollSpeed = parseFloat(scrollSpeed);
+        }
+      }
+
+      // 绑定事件
+      [sizeR, imgR, bgR, hueR, opacityR, ampR, freqR, wspeedR, scrollR, gapR].forEach(function(input) {
+        input.addEventListener('input', update);
+      });
+
+      // 折叠
+      var body = document.getElementById('_ip_body');
+      document.getElementById('_ip_toggle').addEventListener('click', function() {
+        if (body.style.display === 'none') {
+          body.style.display = '';
+          this.textContent = '−';
+        } else {
+          body.style.display = 'none';
+          this.textContent = '+';
+        }
+      });
+
+      // 导出参数
+      document.getElementById('_ip_export').addEventListener('click', function() {
+        var out = document.getElementById('_ip_output');
+        var params = `/* 图标样式 */
+.icon-item {
+  width: ${sizeR.value}px;
+  height: ${sizeR.value}px;
+  background: ${bgR.value};
+}
+.icon-item img {
+  width: ${imgR.value}px;
+  height: ${imgR.value}px;
+  opacity: ${(opacityR.value / 100).toFixed(2)};${hueR.value > 0 ? '\n  filter: hue-rotate(' + hueR.value + 'deg);' : ''}
+}
+.icon-list { gap: ${gapR.value}px; }
+
+/* JS 波动参数 */
+window._iconWave = {
+  amplitude: ${ampR.value},
+  frequency: ${(freqR.value / 100).toFixed(2)},
+  speed: ${(wspeedR.value / 10).toFixed(1)},
+  scrollSpeed: ${(scrollR.value / 10).toFixed(1)}
+};`;
+        out.style.display = 'block';
+        out.textContent = params;
+      });
+    })();
+  </script>
+
+  <!-- ═══════════════════════════════════════════════════
+       调控面板：实时调节三步区布局参数
+  ═══════════════════════════════════════════════════ -->
+  <div id="step-tuner" style="
+    position: fixed; bottom: 20px; right: 20px; z-index: 99999;
+    background: rgba(15,10,30,0.92); backdrop-filter: blur(12px);
+    border-radius: 14px; padding: 18px 22px 14px; color: #fff;
+    font-family: -apple-system, 'PingFang SC', sans-serif; font-size: 13px;
+    width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); user-select: none;
+  ">
+    <div style="font-weight:600; font-size:14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      <span>三步区调控面板</span>
+      <span id="tuner-toggle" style="cursor:pointer; opacity:0.6; font-size:18px;">−</span>
+    </div>
+    <div id="tuner-body">
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>图片容器最大宽度</span><span id="v-img-w">1360px</span></span>
+        <input type="range" id="r-img-w" min="800" max="1800" value="1360" style="width:100%;margin-top:4px;">
+      </label>
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>外层Row最大宽度</span><span id="v-row-w">1400px</span></span>
+        <input type="range" id="r-row-w" min="900" max="1900" value="1400" style="width:100%;margin-top:4px;">
+      </label>
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>图片最大高度偏移</span><span id="v-img-h">320px</span></span>
+        <input type="range" id="r-img-h" min="100" max="500" value="320" style="width:100%;margin-top:4px;">
+      </label>
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>标题距顶部</span><span id="v-top">80px</span></span>
+        <input type="range" id="r-top" min="40" max="200" value="80" style="width:100%;margin-top:4px;">
+      </label>
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>标题→副标题间距</span><span id="v-gap1">50px</span></span>
+        <input type="range" id="r-gap1" min="0" max="120" value="50" style="width:100%;margin-top:4px;">
+      </label>
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>副标题→图片间距</span><span id="v-gap2">80px</span></span>
+        <input type="range" id="r-gap2" min="20" max="200" value="80" style="width:100%;margin-top:4px;">
+      </label>
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:flex;justify-content:space-between;"><span>前置态图片位置(top)</span><span id="v-pre">40vh</span></span>
+        <input type="range" id="r-pre" min="20" max="70" value="40" style="width:100%;margin-top:4px;">
+      </label>
+      <div id="tuner-output" style="margin-top:8px; padding:8px 10px; background:rgba(255,255,255,0.08); border-radius:8px; font-size:11px; font-family:monospace; white-space:pre-wrap; display:none;"></div>
+      <button id="tuner-copy" style="
+        margin-top:10px; width:100%; padding:7px 0; border:none; border-radius:8px;
+        background:#6c5ce7; color:#fff; font-size:13px; font-weight:500; cursor:pointer;
+      ">复制当前参数</button>
+    </div>
+  </div>
+  <script>
+    (function() {
+      var root = document.documentElement;
+      var imgEl = document.querySelector('.step-image');
+      var rowEl = document.querySelector('.step-row');
+
+      var rImgW = document.getElementById('r-img-w');
+      var rRowW = document.getElementById('r-row-w');
+      var rImgH = document.getElementById('r-img-h');
+      var rTop = document.getElementById('r-top');
+      var rGap1 = document.getElementById('r-gap1');
+      var rGap2 = document.getElementById('r-gap2');
+      var rPre = document.getElementById('r-pre');
+
+      function update() {
+        var imgW = rImgW.value + 'px';
+        var rowW = rRowW.value + 'px';
+        var imgH = rImgH.value + 'px';
+        var top = rTop.value + 'px';
+        var gap1 = rGap1.value + 'px';
+        var gap2 = rGap2.value + 'px';
+        var pre = rPre.value + 'vh';
+
+        // 更新显示值
+        document.getElementById('v-img-w').textContent = imgW;
+        document.getElementById('v-row-w').textContent = rowW;
+        document.getElementById('v-img-h').textContent = imgH;
+        document.getElementById('v-top').textContent = top;
+        document.getElementById('v-gap1').textContent = gap1;
+        document.getElementById('v-gap2').textContent = gap2;
+        document.getElementById('v-pre').textContent = pre;
+
+        // 直接修改元素样式
+        if (imgEl) imgEl.style.maxWidth = imgW;
+        if (rowEl) rowEl.style.maxWidth = rowW;
+
+        // CSS 变量
+        root.style.setProperty('--step-img-max-height', 'calc(100vh - ' + imgH + ')');
+        root.style.setProperty('--step-heading-top', top);
+        root.style.setProperty('--step-title-sub-gap', gap1);
+        root.style.setProperty('--step-sub-img-gap', gap2);
+
+        // 前置态 row top（需要通过 JS 桥接）
+        if (window.__step) {
+          window.__step.setGap(parseInt(rGap2.value) || 80);
+          window.__step.clearCache();
+          if (window.__step.isSeg1Done()) {
+            var row = window.__step.getRow();
+            if (row) row.style.top = window.__step.calcTop();
+          }
+        }
+      }
+
+      [rImgW, rRowW, rImgH, rTop, rGap1, rGap2, rPre].forEach(function(r) {
+        r.addEventListener('input', update);
+      });
+
+      // 复制参数
+      document.getElementById('tuner-copy').addEventListener('click', function() {
+        var txt = '/* step-row */\nmax-width: ' + rRowW.value + 'px;\n\n' +
+          '/* .step-image */\nmax-width: ' + rImgW.value + 'px;\n\n' +
+          ':root {\n' +
+          '  --step-heading-top: ' + rTop.value + 'px;\n' +
+          '  --step-title-sub-gap: ' + rGap1.value + 'px;\n' +
+          '  --step-sub-img-gap: ' + rGap2.value + 'px;\n' +
+          '  --step-img-max-height: calc(100vh - ' + rImgH.value + 'px);\n' +
+          '}\n\n/* .step-row 前置态 */\ntop: ' + rPre.value + 'vh;';
+        var out = document.getElementById('tuner-output');
+        out.textContent = txt;
+        out.style.display = 'block';
+        if (navigator.clipboard) navigator.clipboard.writeText(txt);
+      });
+
+      // 折叠/展开
+      document.getElementById('tuner-toggle').addEventListener('click', function() {
+        var body = document.getElementById('tuner-body');
+        if (body.style.display === 'none') {
+          body.style.display = 'block';
+          this.textContent = '−';
+        } else {
+          body.style.display = 'none';
+          this.textContent = '+';
+        }
+      });
     })();
   </script>
 
