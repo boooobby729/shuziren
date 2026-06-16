@@ -3251,16 +3251,28 @@ window.__step = {
 
   <!-- 确保视频在慢速网络下也能自动播放 -->
   <script>
-    document.querySelectorAll('video[autoplay]').forEach(function(v) {
-      function tryPlay() {
-        v.play().catch(function() {});
-      }
-      if (v.readyState >= 2) {
-        tryPlay();
-      } else {
-        v.addEventListener('canplay', tryPlay, { once: true });
-      }
-    });
+    (function() {
+      document.querySelectorAll('video[autoplay]').forEach(function(v) {
+        function tryPlay() {
+          var p = v.play();
+          if (p && p.catch) p.catch(function() {});
+        }
+        v.addEventListener('canplay', tryPlay);
+        v.addEventListener('loadeddata', tryPlay);
+        if (v.readyState >= 2) tryPlay();
+
+        // 定期重试：应对 GitHub Pages 等慢速 CDN
+        var retries = 0;
+        var timer = setInterval(function() {
+          retries++;
+          if (!v.paused || retries > 30) {
+            clearInterval(timer);
+            return;
+          }
+          if (v.readyState >= 2) tryPlay();
+        }, 1000);
+      });
+    })();
   </script>
 
 </body>
