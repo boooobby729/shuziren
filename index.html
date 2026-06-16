@@ -813,27 +813,17 @@ transition: none; /* 段1滚动驱动时需要即时跟手，不加transition；
       margin: 0;
     }
 
-/* 图片（放大约 2 倍，居中显示）—— 当前为原 980px 的 1.2 倍 */
-.step-image {
-position: relative;  /* 为退出图片的绝对定位提供定位上下文 */
-      flex: 0 1 auto;
-      width: 100%;
-      max-width: 1360px;   /* 容器够宽时最大 1360px */
-      /* aspect-ratio removed: 图片自然高度，向下延伸 */
-      /* 3D 透视：以底边为轴向后翻倒，随滚动“立起来”。
-         变量由 JS 写入，平躺(大角度/下沉/缩小/模糊/半透明)→立起(0/原位/原大/清晰/不透明)。 */
-      --step-tilt: 22deg;        /* 倾角：梯形透视预览（须与 JS TILT_START 一致） */
-      --step-lift: 0px;          /* 下沉位移：图片由 top 定位 + 倾角自然落位，lift 起点 0（--step-shift 在 .step-row 上） */
-      --step-scale: 0.96;        /* 预览时略缩小，立起回 1 */
-      --step-blur: 1.2px;        /* 预览时极轻微模糊，立起渐变清晰 */
-      --step-opacity: 0.92;      /* 预览态已清晰可辨，立起渐变不透明 */
-      /* 绕底边翻倒：平躺时图片顶部向屏幕深处倒下去、底边贴近视点，
-         顶边远、底边近 → 近大远小的真梯形透视（屏幕躺在桌面上的观感）。
-         关键：用 transform 里前置的 perspective() 函数提供透视，
-         而不靠祖先 .s3-pin-stage 的 perspective——因为中间的 .step-row 用了
-         translate 且未开 preserve-3d，会把 3D 上下文压平、使 rotateX 退化为“竖向压扁”。
-         在本元素 transform 内用 perspective() 函数可绕过该问题，必定产生梯形。
-         立起时倾角回 0 自然正视。 */
+/* 图片容器：收缩到图片实际大小，不产生多余背景 */
+    .step-image {
+      position: relative;
+      display: inline-block;
+      max-width: 1360px;
+      /* 3D 透视变量，由 JS 写入 */
+      --step-tilt: 22deg;
+      --step-lift: 0px;
+      --step-scale: 0.96;
+      --step-blur: 1.2px;
+      --step-opacity: 0.92;
       transform-origin: center bottom;
       transform:
         perspective(1000px)
@@ -843,19 +833,16 @@ position: relative;  /* 为退出图片的绝对定位提供定位上下文 */
       opacity: var(--step-opacity);
       filter: blur(var(--step-blur));
       will-change: transform, opacity, filter;
-      /* 滚动驱动：不加 transition，由 JS 逐帧写入值实现平滑立起 */
     }
 
     .step-image img {
       display: block;
-      width: 100%;
+      max-width: 100%;
       height: auto;
-      /* 限制图片最大高度：由 --step-img-max-height 控制 */
       max-height: var(--step-img-max-height, calc(100vh - 240px));
       object-fit: contain;
       border-radius: 16px;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
-      /* 图片切换：淡入淡出 + 轻微缩放 */
       transition: opacity 0.5s ease, transform 0.5s ease;
     }
 
