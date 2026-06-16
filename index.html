@@ -817,7 +817,7 @@ transition: none; /* 段1滚动驱动时需要即时跟手，不加transition；
     .step-image {
       position: relative;
       display: inline-block;
-      max-width: 1360px;
+      max-width: 1398px;
       /* 3D 透视变量，由 JS 写入 */
       --step-tilt: 22deg;
       --step-lift: 0px;
@@ -921,17 +921,19 @@ transform: translateX(0);
     }
 
 .step-card-img {
-width: 100%;
-max-width: 1360px;
-margin: 0 auto;
+display: inline-block;
+max-width: 1398px;
+text-align: center;
 }
 
-    .step-card-img img {
-      display: block;
-      width: 100%;
-      height: auto;
-      border-radius: 16px;
-      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
+.step-card-img img {
+display: block;
+max-width: 100%;
+height: auto;
+max-height: var(--step-img-max-height, calc(100vh - 240px));
+object-fit: contain;
+border-radius: 16px;
+box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
     }
 
     /* 步骤卡片光标：与第三屏光标同尺寸同闪烁 */
