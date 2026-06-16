@@ -1320,11 +1320,11 @@ transform: translateX(0);
 
         <!-- 右侧3D视频 -->
         <div class="hero-right">
-          <video class="hero-video" autoplay loop muted playsinline>
+          <video class="hero-video" autoplay loop muted playsinline preload="auto">
             <source src="assets/crystal-orb.webm" type="video/webm">
           </video>
           <!-- 倒影 -->
-          <video class="hero-video hero-video-reflection" autoplay loop muted playsinline aria-hidden="true">
+          <video class="hero-video hero-video-reflection" autoplay loop muted playsinline preload="auto" aria-hidden="true">
             <source src="assets/crystal-orb.webm" type="video/webm">
           </video>
         </div>
@@ -3249,6 +3249,19 @@ window.__step = {
     })();
   </script>
 
+  <!-- 确保视频在慢速网络下也能自动播放 -->
+  <script>
+    document.querySelectorAll('video[autoplay]').forEach(function(v) {
+      function tryPlay() {
+        v.play().catch(function() {});
+      }
+      if (v.readyState >= 2) {
+        tryPlay();
+      } else {
+        v.addEventListener('canplay', tryPlay, { once: true });
+      }
+    });
+  </script>
 
 </body>
 </html>
