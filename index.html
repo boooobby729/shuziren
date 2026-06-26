@@ -59,6 +59,10 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     /* =============================================
        生命游戏背景动效（细胞自动机）
        —— 固定全屏，铺在白色底色之上、所有内容之下
@@ -1186,6 +1190,121 @@ box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
     }
 
     /* =============================================
+       第五屏：专业级AI直播能力 — 左文右图交替
+    ============================================= */
+    .cap-section {
+      position: relative;
+      padding: 120px 40px;
+      max-width: 1688px;
+      margin: 0 auto;
+    }
+
+    .cap-section-title {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 48px;
+      font-weight: bold;
+      color: #0c0024;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .cap-section-sub {
+      font-size: 18px;
+      color: #6b6480;
+      text-align: center;
+      margin-bottom: 80px;
+    }
+
+    .cap-row {
+      display: flex;
+      align-items: center;
+      gap: 80px;
+      margin-bottom: 100px;
+      padding: 0 60px;
+    }
+
+    .cap-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .cap-text {
+      flex: 2;
+    }
+
+    .cap-tag {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      background: linear-gradient(135deg, #6e3eff, #b44aff);
+      padding: 4px 14px;
+      border-radius: 20px;
+      margin-bottom: 16px;
+    }
+
+    .cap-title {
+      font-family: "Hiragino Sans GB W6", "Hiragino Sans GB", "PingFang SC", -apple-system, sans-serif;
+      font-size: 32px;
+      font-weight: bold;
+      color: #0c0024;
+      margin-bottom: 20px;
+      line-height: 1.3;
+      display: flex;
+      align-items: center;
+    }
+
+    .cap-cursor {
+      display: inline-block;
+      height: 40px;
+      width: auto;
+      margin-left: 2px;
+      vertical-align: middle;
+    }
+
+    .cap-desc {
+      font-size: 16px;
+      line-height: 1.8;
+      color: #4a4560;
+    }
+
+    .cap-img {
+      flex: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .cap-img-placeholder {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #f0ecff 0%, #e8e0ff 100%);
+      border: 2px dashed #c4b5fd;
+    }
+
+    .cap-video {
+      width: 100%;
+      border-radius: 36px;
+      object-fit: cover;
+    }
+
+    @media (max-width: 1100px) {
+      .cap-section { padding: 80px 24px; }
+      .cap-section-title { font-size: 36px; }
+      .cap-row { gap: 40px; padding: 0 20px; margin-bottom: 60px; }
+      .cap-title { font-size: 26px; }
+    }
+
+    @media (max-width: 600px) {
+      .cap-section { padding: 60px 16px; }
+      .cap-section-title { font-size: 28px; }
+      .cap-section-sub { font-size: 15px; margin-bottom: 40px; }
+      .cap-row { flex-direction: column; gap: 30px; padding: 0; margin-bottom: 50px; }
+      .cap-title { font-size: 22px; }
+      .cap-img-placeholder { max-width: 320px; }
+    }
+
+    /* =============================================
        图标网格流动区域（screen4 上方）—— 参考 Google Antigravity
     ============================================= */
     .icon-marquee {
@@ -1262,13 +1381,12 @@ box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
         <a href="#" class="logo">
           <img src="assets/logo.webp" alt="美团智播">
         </a>
-        <ul class="nav-links">
-          <li><a href="#">使用说明</a></li>
-          <li><a href="#">产品能力</a></li>
-          <li><a href="#">商家案例</a></li>
-        </ul>
+<ul class="nav-links">
+<li><a href="#">使用说明</a></li>
+<li><a href="#capSection">产品能力</a></li>
+<li><a href="#">商家案例</a></li>
+</ul>
       </div>
-      <a href="#" class="btn-nav">免费体验</a>
     </div>
   </nav>
 
@@ -1280,10 +1398,6 @@ box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
     <!-- 生命游戏背景动效（细胞自动机）：仅首屏可见，铺在 hero 最底层 -->
     <canvas id="lifeBgCanvas" class="life-bg-canvas" aria-hidden="true"></canvas>
 
-    <!-- 首屏底部背景光晕 -->
-    <img src="assets/hero-glow-bg.webp" alt="" class="hero-glow-bg">
-        <!-- 噪点抖动层：消除渐变色带 -->
-        <div class="hero-noise"></div>
       <div class="hero-inner">
 
         <!-- 左侧文字内容 -->
@@ -1312,105 +1426,86 @@ box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
           <video class="hero-video" autoplay loop muted playsinline preload="auto">
             <source src="assets/crystal-orb.webm" type="video/webm">
           </video>
-          <!-- 倒影 -->
-          <video class="hero-video hero-video-reflection" autoplay loop muted playsinline preload="auto" aria-hidden="true">
-            <source src="assets/crystal-orb.webm" type="video/webm">
-          </video>
         </div>
 
       </div>
     </section>
 
-    <!-- 滚动动画预留空间：让页面可滚动到第三屏以后，为光晕图动画提供行程 -->
-    <section class="scroll-zone">
-      <!-- 第二屏文案：滚动进入时打字机逐字出现，光标跟随 -->
-      <div class="scroll-line">
-        <span class="scroll-type" data-text="你专注把店开好，剩下的让 AI打理一切"></span><img src="assets/cursor.webp" alt="" class="scroll-cursor">
-      </div>
 
-      <!-- 数据卡片：三列并排，滑入后从背面翻转到正面 -->
-      <div class="stat-cards">
-        <div class="stat-card">
-          <div class="card-inner">
-            <div class="card-front"><img src="assets/card-1.webp" alt="7x24h 不间断直播"></div>
-            <div class="card-back"><img src="assets/card-back.webp" alt=""></div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="card-inner">
-            <div class="card-front"><img src="assets/card-2.webp" alt="2.05亿 带动成交额"></div>
-            <div class="card-back"><img src="assets/card-back.webp" alt=""></div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="card-inner">
-            <div class="card-front"><img src="assets/card-3.webp" alt="4788+ 入驻商家"></div>
-            <div class="card-back"><img src="assets/card-back.webp" alt=""></div>
-          </div>
-        </div>
-      </div>
+<!-- 专业级AI直播能力 -->
+<section class="cap-section" id="capSection">
 
-    </section>
+  <!-- 模块1：智能形象 + 智能装修 -->
+  <div class="cap-row">
+    <div class="cap-text">
+      <h3 class="cap-title"><span data-text="智能形象 + 智能装修"></span><img src="assets/cursor.webp" alt="" class="cap-cursor cursor-hidden"></h3>
+      <p class="cap-desc" data-text="300+ 数字人形象随心挑选，搭配 200+ 套精美模板。节日主题持续上新，AI 一键智能装修自动适配门店风格——30 秒生成直播素材，拎包即播。"></p>
+    </div>
+    <div class="cap-img">
+      <div class="cap-img-placeholder"></div>
+    </div>
+  </div>
 
-    <!-- 第三屏叙事（sticky 吸附，参考 Tabbit 首屏）：
-         pin-zone 提供滚动行程，pin-stage 钉满视口；滚动该区段时
-         标题与图片被钉在视口里做「标题原位替换 + 图片由底端平躺→立正变清晰」的动画，
-         图片立正后稳停视口中部不飞走。 -->
-    <section class="s3-pin-zone">
-      <div class="s3-pin-stage">
-        <!-- 第三屏打字机主标题（旧标题） -->
-        <div class="screen3">
-          <div class="screen3-title"><span class="s3-dark s3-type"></span><span class="s3-grad s3-type"></span><img src="assets/cursor.webp" alt="" class="screen3-cursor"></div>
-          <div class="screen3-sub">不用懂直播，不用请人，3分钟搞定一个直播间</div>
-        </div>
+  <!-- 模块2：智能音色 + 智能讲解 -->
+  <div class="cap-row">
+    <div class="cap-text">
+      <h3 class="cap-title"><span data-text="智能音色 + 智能讲解"></span><img src="assets/cursor.webp" alt="" class="cap-cursor cursor-hidden"></h3>
+      <p class="cap-desc" data-text="30+ 音色任你挑选，AI 自动读取商品与门店信息，智能生成讲解文案，千店千面各不相同——无需培训真人主播，即改即播。"></p>
+    </div>
+    <div class="cap-img">
+      <video class="cap-video" src="assets/ai-koubo-3.mp4" autoplay loop muted playsinline></video>
+    </div>
+  </div>
 
-        <!-- 步骤 01：选商品 -->
-        <div class="steps-section">
-        <!-- 新标题：旧标题逐字退场后，在同位置「逐字打出 + 光标前进」接替（与全站统一）。
-             num/name 两段文字交给统一揭示库拆字，共享一个 step-heading-cursor 光标。 -->
-        <div class="step-heading">
-          <div class="step-heading-title">
-            <span class="step-heading-num" data-text="第一步"></span>
-            <span class="step-heading-name" data-text="选商品"></span><img src="assets/cursor.webp" alt="" class="step-heading-cursor cursor-hidden">
-          </div>
-          <div class="step-heading-sub">选好直播间中所要售卖的商品，讲解词+卖点话术全自动生成</div>
-        </div>
-          <div class="step-row">
-            <div class="step-image">
-              <img src="assets/step-1.webp" alt="选商品后台界面">
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+  <!-- 模块3：实时回复 -->
+  <div class="cap-row">
+    <div class="cap-text">
+      <h3 class="cap-title"><span data-text="实时回复"></span><img src="assets/cursor.webp" alt="" class="cap-cursor cursor-hidden"></h3>
+      <p class="cap-desc" data-text="用户提问秒级响应，语音播报 + 评论区文字双管齐下。AI 懂商品、懂门店、懂优惠，智能应答高频问题，边聊边促成交。"></p>
+    </div>
+    <div class="cap-img">
+      <div class="cap-img-placeholder"></div>
+    </div>
+  </div>
 
-    <!-- 终点缓冲 -->
-    <section class="s3-end-spacer" aria-hidden="true"></section>
+  <!-- 模块4：AI 助播 + AI 切镜 -->
+  <div class="cap-row">
+    <div class="cap-text">
+      <h3 class="cap-title"><span data-text="AI 助播 + AI 切镜"></span><img src="assets/cursor.webp" alt="" class="cap-cursor cursor-hidden"></h3>
+      <p class="cap-desc" data-text="新观众进来自动欢迎，有人下单即时庆祝，全程不冷场。用户聊到某个商品时自动切镜展示，所见即所得——AI 控场，运营效率提升约 60%。"></p>
+    </div>
+    <div class="cap-img">
+      <div class="cap-img-placeholder"></div>
+    </div>
+  </div>
 
-    <!-- 第二步、第三步：纵向展开，正常文档流 -->
-    <section class="steps-expand">
-      <div class="step-card" data-step-card>
-        <div class="step-card-heading">
-          <span class="step-card-num" data-text="第二步"></span>
-          <span class="step-card-name" data-text="配装修"></span><img src="assets/cursor.webp" alt="" class="step-card-cursor cursor-hidden">
-        </div>
-        <p class="step-card-sub" data-text="300+数字人形象库里选一个，直播间背景装修一步到位"></p>
-        <div class="step-card-img">
-          <img src="assets/step-2.webp" alt="配装修界面">
-        </div>
-      </div>
-      <div class="step-card" data-step-card>
-        <div class="step-card-heading">
-          <span class="step-card-num" data-text="第三步"></span>
-          <span class="step-card-name" data-text="自动开播"></span><img src="assets/cursor.webp" alt="" class="step-card-cursor cursor-hidden">
-        </div>
-        <p class="step-card-sub" data-text="合成完成后7×24全天候，关掉电脑也不停，边聊边卖不漏单"></p>
-        <div class="step-card-img">
-          <img src="assets/step-3.webp" alt="自动开播界面">
-        </div>
-      </div>
-    </section>
+  <!-- 模块5：实景定制 + 真人复刻 -->
+  <div class="cap-row">
+    <div class="cap-text">
+      <h3 class="cap-title"><span data-text="实景定制 + 真人复刻"></span><img src="assets/cursor.webp" alt="" class="cap-cursor cursor-hidden"></h3>
+      <p class="cap-desc" data-text="打造你的专属直播间——用店里真实的员工形象、菜品与门店环境录制专属素材，实景画面让观众"身临其境"。克隆真人主播的声音与形象，真人在播 8 小时，闲时由 AI 分身接力，7×24h 不间断覆盖全时段流量。"></p>
+    </div>
+    <div class="cap-img">
+      <div class="cap-img-placeholder"></div>
+    </div>
+  </div>
+</section>
 
+<!-- 数字人形象介绍 — 模型居中，标题左右分布 -->
+<section class="screen4" id="screen4Section">
+<div class="screen4-inner">
+  <div class="screen4-title-row">
+    <h2 class="screen4-title-left" data-text="你的直播间">你的直播间</h2>
+    <h2 class="screen4-title-right"><span data-text="不再依赖真人"></span><img src="assets/cursor.webp" alt="" class="screen4-cursor cursor-hidden"></h2>
+  </div>
+  <div class="screen4-model-wrap">
+    <canvas class="screen4-model-canvas" id="modelCanvas"></canvas>
+  </div>
+  <div class="screen4-sub-wrap">
+    <p class="screen4-sub" data-text="行业专属数字人形象，支持真人 1:1 复刻与门店实景定制。3 分钟完成配置，7×24 小时稳定上播不请假"></p>
+  </div>
+</div>
+</section>
 
 <!-- 图标网格流动区域 -->
 <section class="icon-marquee" aria-hidden="true">
@@ -1443,24 +1538,57 @@ box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
   </ul>
 </section>
 
-<!-- 第四屏：数字人形象介绍 — 模型居中，标题左右分布 -->
-<section class="screen4" id="screen4Section">
-<div class="screen4-inner">
-  <!-- 标题行：左右各一部分，z-index 在模型下方 -->
-  <div class="screen4-title-row">
-    <h2 class="screen4-title-left" data-text="你的直播间">你的直播间</h2>
-    <h2 class="screen4-title-right"><span data-text="不再依赖真人"></span><img src="assets/cursor.webp" alt="" class="screen4-cursor cursor-hidden"></h2>
-  </div>
-  <!-- 3D 模型覆盖在文字上方 -->
-  <div class="screen4-model-wrap">
-    <canvas class="screen4-model-canvas" id="modelCanvas"></canvas>
-  </div>
-  <!-- 副标题居中底部 -->
-  <div class="screen4-sub-wrap">
-    <p class="screen4-sub" data-text="行业专属数字人形象，支持真人 1:1 复刻与门店实景定制。3 分钟完成配置，7×24 小时稳定上播不请假"></p>
-  </div>
-</div>
-</section>
+    <!-- 三步流程 -->
+    <section class="s3-pin-zone">
+      <div class="s3-pin-stage">
+        <div class="screen3">
+          <div class="screen3-title"><span class="s3-dark s3-type"></span><span class="s3-grad s3-type"></span><img src="assets/cursor.webp" alt="" class="screen3-cursor"></div>
+          <div class="screen3-sub">不用懂直播，不用请人，3分钟搞定一个直播间</div>
+        </div>
+
+        <div class="steps-section">
+        <div class="step-heading">
+          <div class="step-heading-title">
+            <span class="step-heading-num" data-text="第一步"></span>
+            <span class="step-heading-name" data-text="选商品"></span><img src="assets/cursor.webp" alt="" class="step-heading-cursor cursor-hidden">
+          </div>
+          <div class="step-heading-sub">选好直播间中所要售卖的商品，讲解词+卖点话术全自动生成</div>
+        </div>
+          <div class="step-row">
+            <div class="step-image">
+              <img src="assets/step-1.webp" alt="选商品后台界面">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 终点缓冲 -->
+    <section class="s3-end-spacer" aria-hidden="true"></section>
+
+    <!-- 第二步、第三步 -->
+    <section class="steps-expand">
+      <div class="step-card" data-step-card>
+        <div class="step-card-heading">
+          <span class="step-card-num" data-text="第二步"></span>
+          <span class="step-card-name" data-text="配装修"></span><img src="assets/cursor.webp" alt="" class="step-card-cursor cursor-hidden">
+        </div>
+        <p class="step-card-sub" data-text="300+数字人形象库里选一个，直播间背景装修一步到位"></p>
+        <div class="step-card-img">
+          <img src="assets/step-2.webp" alt="配装修界面">
+        </div>
+      </div>
+      <div class="step-card" data-step-card>
+        <div class="step-card-heading">
+          <span class="step-card-num" data-text="第三步"></span>
+          <span class="step-card-name" data-text="自动开播"></span><img src="assets/cursor.webp" alt="" class="step-card-cursor cursor-hidden">
+        </div>
+        <p class="step-card-sub" data-text="合成完成后7×24全天候，关掉电脑也不停，边聊边卖不漏单"></p>
+        <div class="step-card-img">
+          <img src="assets/step-3.webp" alt="自动开播界面">
+        </div>
+      </div>
+    </section>
 
 </div>
 
@@ -2775,6 +2903,50 @@ window.__step = {
       }, { threshold: 0.3 });
 
       observer.observe(section);
+    })();
+  </script>
+
+  <!-- 能力模块（cap-section）打字机效果 -->
+  <script>
+    (function () {
+      var rows = document.querySelectorAll('.cap-section .cap-row');
+      if (!rows.length || !window.createMlbReveal) return;
+
+      rows.forEach(function (row) {
+        var titleSpan = row.querySelector('.cap-title span[data-text]');
+        var cursorEl = row.querySelector('.cap-cursor');
+        var descEl = row.querySelector('.cap-desc[data-text]');
+        if (!titleSpan || !cursorEl || !descEl) return;
+
+        // 构建标题逐字控制器（带光标）
+        var titleReveal = window.createMlbReveal({
+          segments: [{ el: titleSpan, cursor: cursorEl }]
+        });
+        titleReveal.ensureBuilt();
+
+        // 构建描述逐字控制器（无光标，紧随标题之后播放）
+        var descReveal = window.createMlbReveal({
+          segments: [{ el: descEl }]
+        });
+        descReveal.ensureBuilt();
+
+        var triggered = false;
+
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting && !triggered) {
+              triggered = true;
+              observer.unobserve(entry.target);
+              // 标题逐字出现 → 描述逐字出现(20ms/字)
+              titleReveal.playReveal(function () {
+                descReveal.playReveal(null, 20);
+              });
+            }
+          });
+        }, { threshold: 0.3 });
+
+        observer.observe(row);
+      });
     })();
   </script>
 
